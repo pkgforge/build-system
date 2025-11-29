@@ -35,9 +35,10 @@ func FetchGHCRPackages() ([]GHCRPackage, error) {
 
 		// Add GitHub token if available for higher rate limits
 		if token := getGitHubToken(); token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Authorization", "token "+token)
 		}
 		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 		client := &http.Client{}
 		resp, err := client.Do(req)
