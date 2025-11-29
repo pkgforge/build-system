@@ -36,10 +36,10 @@ jobs:
 
     steps:
       - name: Checkout build-system
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout soarpkgs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.SOARPKGS_REPO }}
           path: soarpkgs
@@ -91,10 +91,10 @@ jobs:
 
     steps:
       - name: Checkout build-system
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout soarpkgs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.SOARPKGS_REPO }}
           path: soarpkgs
@@ -169,12 +169,12 @@ jobs:
 
     steps:
       - name: Checkout build-system
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: build-system
 
       - name: Checkout soarpkgs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.SOARPKGS_REPO }}
           path: soarpkgs
@@ -417,10 +417,10 @@ jobs:
 
     steps:
       - name: Checkout build-system
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout soarpkgs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.SOARPKGS_REPO }}
           path: soarpkgs
