@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -57,59 +55,9 @@ func InstallSoarql(installPath string) error {
 	}
 	arch = strings.TrimSpace(arch)
 
-	// Fetch latest release
-	url := fmt.Sprintf("https://api.gh.pkgforge.dev/repos/pkgforge/soarql/releases?per_page=1")
-	resp, err := http.Get(url)
-	if err != nil {
-		return fmt.Errorf("failed to fetch soarql releases: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to fetch soarql releases: status %d", resp.StatusCode)
-	}
-
-	// Read entire response body
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var releases []struct {
-		TagName string `json:"tag_name"`
-		Assets []struct {
-			BrowserDownloadURL string `json:"browser_download_url"`
-			Name               string `json:"name"`
-		} `json:"assets"`
-	}
-
-	if err := json.Unmarshal(bodyBytes, &releases); err != nil {
-		return fmt.Errorf("failed to parse releases (body preview: %s...): %w", string(bodyBytes[:min(100, len(bodyBytes))]), err)
-	}
-
-	if len(releases) == 0 {
-		return fmt.Errorf("no releases found")
-	}
-
-	release := releases[0]
-
-	// Find matching binary
-	var downloadURL string
-	for _, asset := range release.Assets {
-		// Look for soarql-{arch}-linux binary
-		if strings.Contains(asset.Name, arch) &&
-		   strings.HasPrefix(asset.Name, "soarql-") &&
-		   strings.HasSuffix(asset.Name, "-linux") {
-			downloadURL = asset.BrowserDownloadURL
-			break
-		}
-	}
-
-	if downloadURL == "" {
-		return fmt.Errorf("no soarql binary found for architecture: %s", arch)
-	}
-
-	fmt.Printf("Downloading soarql %s from: %s\n", release.TagName, downloadURL)
+	// Download from nightly release directly
+	downloadURL := fmt.Sprintf("https://github.com/pkgforge/soarql/releases/download/nightly/soarql-%s-linux", arch)
+	fmt.Printf("Downloading soarql from: %s\n", downloadURL)
 
 	// Download
 	tmpFile := "/tmp/soarql"
