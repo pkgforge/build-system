@@ -61,17 +61,19 @@ func (u *Uploader) UploadPackage(build *models.Build, pkgDir string) error {
 		imageName,
 	}
 
-	// Add all files from the package directory
+	// Add all files from the package directory as relative paths
 	for _, file := range files {
 		// Skip directories
 		fileInfo, err := os.Stat(file)
 		if err != nil || fileInfo.IsDir() {
 			continue
 		}
-		args = append(args, file)
+		// Use just the filename (will be relative since we set cmd.Dir)
+		args = append(args, filepath.Base(file))
 	}
 
 	cmd := exec.Command(u.orasPath, args...)
+	cmd.Dir = pkgDir // Change to package directory so paths are relative
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
