@@ -199,16 +199,21 @@ jobs:
 
       - name: Setup build environment
         run: |
-          # Install sbuild and dependencies
+          echo "Installing build dependencies..."
           sudo apt-get update
-          sudo apt-get install -y curl wget git build-essential
+          sudo apt-get install -y curl wget git build-essential jq coreutils grep findutils tar gzip bzip2 xz-utils zstd file
+
+          # Install soar (required by sbuild for package management)
+          echo "Installing soar..."
+          curl -qfsSL "https://bin.pkgforge.dev/${{ matrix.arch }}/soar" -o /tmp/soar
+          sudo install -m 755 /tmp/soar /usr/local/bin/soar
+          soar --version || echo "soar version not available"
 
           # Install sbuilder (sbuild binary)
+          echo "Installing sbuild..."
           curl -qfsSL "https://github.com/pkgforge/sbuilder/releases/download/v0.1.10-sbuild/sbuild-x86_64-linux" -o /tmp/sbuild
           sudo install -m 755 /tmp/sbuild /usr/local/bin/sbuild
-
-          # Verify installation
-          sbuild --help
+          sbuild --version || sbuild --help
 
       - name: Login to GHCR
         uses: docker/login-action@v3
