@@ -3,8 +3,8 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -17,51 +17,73 @@ type GHCRPackage struct {
 }
 
 // FetchGHCRPackages fetches all public packages from GitHub Container Registry
+// by querying the GitHub API directly
 func FetchGHCRPackages() ([]GHCRPackage, error) {
-	// Fetch compressed package list from metadata repo
-	url := "https://raw.githubusercontent.com/pkgforge/metadata/refs/heads/main/GHCR_PKGS.json.zstd"
+	fmt.Println("Querying GitHub API for pkgforge GHCR packages...")
 
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch GHCR packages: %w", err)
+	var allPackages []GHCRPackage
+	page := 1
+	perPage := 100
+
+	for {
+		url := fmt.Sprintf("https://api.github.com/orgs/pkgforge/packages?package_type=container&per_page=%d&page=%d", perPage, page)
+
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		// Add GitHub token if available for higher rate limits
+		if token := getGitHubToken(); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		req.Header.Set("Accept", "application/vnd.github+json")
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch GHCR packages: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("failed to fetch GHCR packages: status %d", resp.StatusCode)
+		}
+
+		var packages []GHCRPackage
+		if err := json.NewDecoder(resp.Body).Decode(&packages); err != nil {
+			return nil, fmt.Errorf("failed to parse GHCR packages: %w", err)
+		}
+
+		if len(packages) == 0 {
+			break
+		}
+
+		allPackages = append(allPackages, packages...)
+
+		fmt.Printf("  Fetched page %d (%d packages so far)\n", page, len(allPackages))
+
+		// If we got less than perPage, we're on the last page
+		if len(packages) < perPage {
+			break
+		}
+
+		page++
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch GHCR packages: status %d", resp.StatusCode)
+	return allPackages, nil
+}
+
+// getGitHubToken retrieves GitHub token from environment
+func getGitHubToken() string {
+	// Try common environment variable names
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token
 	}
-
-	// Save to temp file for decompression
-	tmpFile := "/tmp/ghcr_pkgs.json.zstd"
-	out, err := createFile(tmpFile)
-	if err != nil {
-		return nil, err
+	if token := os.Getenv("GH_TOKEN"); token != "" {
+		return token
 	}
-
-	_, err = io.Copy(out, resp.Body)
-	out.Close()
-	if err != nil {
-		return nil, fmt.Errorf("failed to save GHCR packages: %w", err)
-	}
-
-	// Decompress using zstd command
-	decompressed := "/tmp/ghcr_pkgs.json"
-	if err := runCommand("zstd", "--decompress", "--force", tmpFile, "-o", decompressed); err != nil {
-		return nil, fmt.Errorf("failed to decompress GHCR packages: %w", err)
-	}
-
-	// Read and parse JSON
-	data, err := readFile(decompressed)
-	if err != nil {
-		return nil, err
-	}
-
-	var packages []GHCRPackage
-	if err := json.Unmarshal(data, &packages); err != nil {
-		return nil, fmt.Errorf("failed to parse GHCR packages: %w", err)
-	}
-
-	return packages, nil
+	return ""
 }
 
 // FilterBincachePackages filters GHCR packages for bincache
