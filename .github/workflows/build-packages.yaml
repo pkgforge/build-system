@@ -199,21 +199,53 @@ jobs:
 
       - name: Setup build environment
         run: |
-          echo "Installing build dependencies..."
+          echo "Installing system dependencies..."
           sudo apt-get update
-          sudo apt-get install -y curl wget git build-essential jq coreutils grep findutils tar gzip bzip2 xz-utils zstd file
+          sudo apt-get install -y curl wget git build-essential jq coreutils grep findutils tar gzip bzip2 xz-utils zstd file sed gawk
 
-          # Install soar (required by sbuild for package management)
-          echo "Installing soar..."
+          echo ""
+          echo "Installing pkgforge tools..."
+
+          # Install soar (package manager required by sbuild)
+          echo "- Installing soar..."
           curl -qfsSL "https://bin.pkgforge.dev/${{ matrix.arch }}/soar" -o /tmp/soar
           sudo install -m 755 /tmp/soar /usr/local/bin/soar
-          soar --version || echo "soar version not available"
+          soar --version || echo "soar installed"
 
-          # Install sbuilder (sbuild binary)
-          echo "Installing sbuild..."
+          # Add soar bin directory to PATH
+          echo "$HOME/.local/share/soar/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/share/soar/bin:$PATH"
+
+          # Install b3sum (BLAKE3 checksum tool)
+          echo "- Installing b3sum..."
+          curl -qfsSL "https://bin.pkgforge.dev/${{ matrix.arch }}/b3sum" -o /tmp/b3sum
+          sudo install -m 755 /tmp/b3sum /usr/local/bin/b3sum
+          b3sum --version || echo "b3sum installed"
+
+          # Install yj (YAML/JSON converter)
+          echo "- Installing yj..."
+          curl -qfsSL "https://bin.pkgforge.dev/${{ matrix.arch }}/yj" -o /tmp/yj
+          sudo install -m 755 /tmp/yj /usr/local/bin/yj
+          yj --version || echo "yj installed"
+
+          # Install yq (YAML processor)
+          echo "- Installing yq..."
+          curl -qfsSL "https://bin.pkgforge.dev/${{ matrix.arch }}/yq" -o /tmp/yq
+          sudo install -m 755 /tmp/yq /usr/local/bin/yq
+          yq --version || echo "yq installed"
+
+          # Install squishy-cli (AppImage manipulation tool)
+          echo "- Installing squishy-cli via soar..."
+          soar add squishy-cli --yes || echo "squishy-cli installation failed (non-fatal)"
+
+          # Install sbuild (build tool)
+          echo "- Installing sbuild..."
           curl -qfsSL "https://github.com/pkgforge/sbuilder/releases/download/v0.1.10-sbuild/sbuild-x86_64-linux" -o /tmp/sbuild
           sudo install -m 755 /tmp/sbuild /usr/local/bin/sbuild
           sbuild --version || sbuild --help
+
+          echo ""
+          echo "✓ Build environment ready"
 
       - name: Login to GHCR
         uses: docker/login-action@v3
