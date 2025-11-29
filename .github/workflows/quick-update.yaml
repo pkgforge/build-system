@@ -92,8 +92,41 @@ jobs:
           ./buildctl status
 
           # Build queued packages
-          # TODO: Implement actual build execution
-          echo "Building packages..."
+          echo ""
+          echo "=========================================="
+          echo "Building Queued Packages"
+          echo "=========================================="
+
+          while true; do
+            # Get next queued build
+            BUILD=$(./buildctl list --status queued --limit 1 2>/dev/null | grep "^ID:" | head -1)
+
+            if [ -z "$BUILD" ]; then
+              echo "No more builds in queue"
+              break
+            fi
+
+            # Extract build ID and package name
+            BUILD_ID=$(echo "$BUILD" | awk -F'|' '{print $1}' | awk '{print $2}')
+            PKG_NAME=$(echo "$BUILD" | awk -F'|' '{print $3}' | awk '{print $1}')
+
+            echo ""
+            echo "Building: $PKG_NAME (ID: $BUILD_ID)"
+
+            # Execute build
+            if ./buildctl build --repo "$GITHUB_WORKSPACE/soarpkgs" --id "$BUILD_ID" --arch "${{ matrix.arch }}"; then
+              echo "✓ Build succeeded: $PKG_NAME"
+            else
+              echo "✗ Build failed: $PKG_NAME"
+              exit 1
+            fi
+          done
+
+          echo ""
+          echo "=========================================="
+          echo "Final Status"
+          echo "=========================================="
+          ./buildctl status
 
       - name: Create summary
         if: always()

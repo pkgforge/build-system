@@ -48,6 +48,7 @@ func main() {
 	rootCmd.AddCommand(resetCmd())
 	rootCmd.AddCommand(cancelCmd())
 	rootCmd.AddCommand(listCmd())
+	rootCmd.AddCommand(generateCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

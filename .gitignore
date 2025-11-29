@@ -1,5 +1,5 @@
 # Binaries
-buildctl
+*buildctl
 *.exe
 *.dll
 *.so

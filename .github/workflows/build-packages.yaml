@@ -382,24 +382,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xz-utils zstd sqlite3 jq
 
-      - name: Generate INDEX.json
+      - name: Generate metadata
         run: |
-          mkdir -p artifacts
+          echo "=========================================="
+          echo "Generating Metadata"
+          echo "=========================================="
 
-          # Generate base INDEX.json
-          # TODO: Implement metadata generator
-          # For now, scan recipes and create basic structure
+          # Generate INDEX.json and stats from build results
+          ./buildctl generate --output artifacts
 
-          # This will be replaced with: ./buildctl generate --repo "$GITHUB_WORKSPACE/soarpkgs"
+          # Generate bincache metadata for each architecture
+          for arch in x86_64-Linux aarch64-Linux riscv64-Linux; do
+            echo ""
+            echo "Generating bincache metadata for $arch..."
+            ./buildctl generate --output artifacts --bincache --arch "$arch" --parallel 10 || echo "Warning: bincache generation failed for $arch"
+          done
 
-          echo '{
-            "version": "1.0.0",
-            "generated_at": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
-            "total_packages": 0,
-            "packages": []
-          }' > artifacts/INDEX.json
+          # Generate pkgcache metadata for each architecture
+          for arch in x86_64-Linux aarch64-Linux riscv64-Linux; do
+            echo ""
+            echo "Generating pkgcache metadata for $arch..."
+            ./buildctl generate --output artifacts --pkgcache --arch "$arch" --parallel 10 || echo "Warning: pkgcache generation failed for $arch"
+          done
 
-          echo "Generated INDEX.json"
+          echo ""
+          echo "=========================================="
+          echo "Generated metadata files"
+          echo "=========================================="
+          find artifacts -type f | sort
 
       - name: Fetch GHCR download statistics
         run: |
