@@ -113,8 +113,8 @@ func (e *Executor) ExecuteBuild(build *models.Build) error {
 	}
 	defer logWriter.Close()
 
-	// Run sbuild
-	outDir := filepath.Join(e.workDir, "artifacts")
+	// Run sbuild with unique output directory per build
+	outDir := filepath.Join(e.workDir, "artifacts", fmt.Sprintf("build-%d", build.ID))
 	if err := e.runSbuild(build, logWriter, outDir); err != nil {
 		duration := int(time.Since(startTime).Seconds())
 
@@ -138,11 +138,20 @@ func (e *Executor) ExecuteBuild(build *models.Build) error {
 	fmt.Printf("  ↑ Uploading to GHCR...\n")
 	uploader := ghcr.NewUploader()
 
-	// sbuild creates a directory named {pkg_id} inside outdir
-	pkgDir := filepath.Join(outDir, build.PkgID)
-	if err := uploader.UploadPackage(build, pkgDir); err != nil {
+	// sbuild outputs files directly to outDir without creating a subdirectory
+	// Just use the outDir itself as the package directory
+	fmt.Printf("    Uploading from: %s\n", outDir)
+
+	if err := uploader.UploadPackage(build, outDir); err != nil {
 		// Don't fail the build, just log the error
 		fmt.Printf("  ⚠ Warning: Failed to upload to GHCR: %v\n", err)
+	} else {
+		fmt.Printf("  ✓ Upload completed\n")
+
+		// Clean up artifacts after successful upload to save disk space
+		if err := os.RemoveAll(outDir); err != nil {
+			fmt.Printf("  ⚠ Warning: Failed to cleanup artifacts: %v\n", err)
+		}
 	}
 
 	// Mark as succeeded
