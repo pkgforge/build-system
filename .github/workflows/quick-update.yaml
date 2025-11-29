@@ -93,14 +93,22 @@ jobs:
           sudo install -m 755 /tmp/yq /usr/local/bin/yq
           yq --version || echo "yq installed"
 
-          # Install squishy (AppImage manipulation tool)
-          echo "- Installing squishy..."
+          # Install squishy-cli (AppImage manipulation tool)
+          echo "- Installing squishy-cli..."
           SQUISHY_ARCH="${{ matrix.arch }}"
           SQUISHY_ARCH="${SQUISHY_ARCH//-Linux/}"
           SQUISHY_ARCH="${SQUISHY_ARCH,,}"  # Convert to lowercase
           curl -qfsSL "https://github.com/pkgforge/squishy-rs/releases/download/v0.3.1/squishy-${SQUISHY_ARCH}-linux" -o /tmp/squishy
           sudo install -m 755 /tmp/squishy /usr/local/bin/squishy-cli
           squishy-cli --version || echo "squishy-cli installed"
+
+          # Install appimagetool (AppImage creation tool)
+          echo "- Installing appimagetool..."
+          APPIMAGETOOL_ARCH="${{ matrix.arch }}"
+          APPIMAGETOOL_ARCH="${APPIMAGETOOL_ARCH//-Linux/}"
+          curl -qfsSL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${APPIMAGETOOL_ARCH}.AppImage" -o /tmp/appimagetool
+          sudo install -m 755 /tmp/appimagetool /usr/local/bin/appimagetool
+          appimagetool --version || echo "appimagetool installed"
 
           # Install sbuild (build tool)
           echo "- Installing sbuild..."

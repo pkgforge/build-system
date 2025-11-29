@@ -243,6 +243,14 @@ jobs:
           sudo install -m 755 /tmp/squishy /usr/local/bin/squishy-cli
           squishy-cli --version || echo "squishy-cli installed"
 
+          # Install appimagetool (AppImage creation tool)
+          echo "- Installing appimagetool..."
+          APPIMAGETOOL_ARCH="${{ matrix.arch }}"
+          APPIMAGETOOL_ARCH="${APPIMAGETOOL_ARCH//-Linux/}"
+          curl -qfsSL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${APPIMAGETOOL_ARCH}.AppImage" -o /tmp/appimagetool
+          sudo install -m 755 /tmp/appimagetool /usr/local/bin/appimagetool
+          appimagetool --version || echo "appimagetool installed"
+
           # Install sbuild (build tool)
           echo "- Installing sbuild..."
           curl -qfsSL "https://github.com/pkgforge/sbuilder/releases/download/v0.1.10-sbuild/sbuild-x86_64-linux" -o /tmp/sbuild
