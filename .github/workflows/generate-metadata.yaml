@@ -44,7 +44,15 @@ jobs:
           sudo install -m 755 /tmp/b3sum /usr/local/bin/b3sum
           b3sum --version || echo "b3sum installed"
 
+          # Install soarql
+          echo "- Installing soarql..."
+          ARCH=$(uname -m)
+          curl -qfsSL "https://github.com/pkgforge/soarql/releases/download/nightly/soarql-${ARCH}-linux" -o /tmp/soarql
+          sudo install -m 755 /tmp/soarql /usr/local/bin/soarql
+
       - name: Generate metadata
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "=========================================="
           echo "Generating Metadata"

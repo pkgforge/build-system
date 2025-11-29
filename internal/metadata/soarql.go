@@ -44,46 +44,6 @@ type SoarqlConfig struct {
 	WorkDir    string
 }
 
-// InstallSoarql downloads and installs the soarql binary
-func InstallSoarql(installPath string) error {
-	fmt.Println("Installing soarql...")
-
-	// Determine architecture
-	arch, err := runCommandWithOutput("uname", "-m")
-	if err != nil {
-		return fmt.Errorf("failed to detect architecture: %w", err)
-	}
-	arch = strings.TrimSpace(arch)
-
-	// Download from nightly release directly
-	downloadURL := fmt.Sprintf("https://github.com/pkgforge/soarql/releases/download/nightly/soarql-%s-linux", arch)
-	fmt.Printf("Downloading soarql from: %s\n", downloadURL)
-
-	// Download
-	tmpFile := "/tmp/soarql"
-	if err := runCommand("curl", "-qfsSL", downloadURL, "-o", tmpFile); err != nil {
-		return fmt.Errorf("failed to download soarql: %w", err)
-	}
-
-	// Install
-	if err := runCommand("chmod", "+x", tmpFile); err != nil {
-		return err
-	}
-
-	if err := copyFile(tmpFile, installPath); err != nil {
-		return fmt.Errorf("failed to install soarql: %w", err)
-	}
-
-	// Verify
-	output, err := runCommandWithOutput(installPath, "--version")
-	if err != nil {
-		return fmt.Errorf("soarql installation verification failed: %w", err)
-	}
-
-	fmt.Printf("Installed soarql: %s\n", strings.TrimSpace(output))
-	return nil
-}
-
 // QueryPackageMetadata uses soarql to fetch metadata for a package
 func QueryPackageMetadata(config SoarqlConfig, ghcrPkg string) (*PackageMetadata, error) {
 	// soarql expects package name without ghcr.io/pkgforge/ prefix

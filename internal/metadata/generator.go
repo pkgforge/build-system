@@ -29,12 +29,9 @@ func NewGenerator(config GeneratorConfig) *Generator {
 func (g *Generator) Generate() error {
 	fmt.Printf("Starting metadata generation for %s (%s)\n", g.config.Type, g.config.Arch)
 
-	// Step 1: Ensure soarql is installed
+	// Step 1: Verify soarql is available
 	if !fileExists(g.config.SoarqlPath) {
-		fmt.Println("soarql not found, installing...")
-		if err := InstallSoarql(g.config.SoarqlPath); err != nil {
-			return fmt.Errorf("failed to install soarql: %w", err)
-		}
+		return fmt.Errorf("soarql not found at %s - please install it first", g.config.SoarqlPath)
 	}
 
 	// Step 2: Fetch GHCR packages
