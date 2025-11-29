@@ -254,13 +254,15 @@ func GetSbuildVersion(sbuildPath string) (string, error) {
 		sbuildPath = "sbuild"
 	}
 
-	cmd := exec.Command(sbuildPath, "--version")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to get sbuild version: %w", err)
-	}
-
-	version := strings.TrimSpace(string(output))
+	// TODO: sbuild doesn't have a version command yet
+	// cmd := exec.Command(sbuildPath, "version")
+	// output, err := cmd.CombinedOutput()
+	// if err != nil {
+	// 	return "", fmt.Errorf("failed to get sbuild version: %w", err)
+	// }
+	//
+	// version := strings.TrimSpace(string(output))
+	version := "0.1.10"
 	return version, nil
 }
 
