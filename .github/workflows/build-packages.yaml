@@ -24,8 +24,6 @@ on:
 
 env:
   SOARPKGS_REPO: pkgforge/soarpkgs
-  BINCACHE_REPO: pkgforge/bincache
-  METADATA_REPO: pkgforge/metadata
 
 jobs:
   # Step 1: Sync recipes and prepare queue
@@ -156,6 +154,7 @@ jobs:
     needs: queue-packages
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 330  # 5.5 hours max
+    if: ${{ inputs.arch == 'all' || inputs.arch == matrix.arch || inputs.arch == '' }}
     strategy:
       fail-fast: false
       max-parallel: 3
