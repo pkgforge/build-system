@@ -1,0 +1,134 @@
+name: Generate Metadata
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Architecture to generate metadata for'
+        required: false
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - x86_64-Linux
+          - aarch64-Linux
+
+jobs:
+  generate:
+    name: Generate Metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout build-system
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build buildctl
+        run: |
+          go build -o buildctl ./cmd/buildctl
+
+      - name: Install dependencies
+        run: |
+          echo "Installing system dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y curl wget jq xz-utils zstd sqlite3
+
+          # Install b3sum
+          echo "- Installing b3sum..."
+          curl -qfsSL "https://bin.pkgforge.dev/x86_64-Linux/b3sum" -o /tmp/b3sum
+          sudo install -m 755 /tmp/b3sum /usr/local/bin/b3sum
+          b3sum --version || echo "b3sum installed"
+
+      - name: Generate metadata
+        run: |
+          echo "=========================================="
+          echo "Generating Metadata"
+          echo "=========================================="
+
+          # Create output directory
+          mkdir -p artifacts
+
+          # Generate INDEX.json from build results (if database exists)
+          if [ -f buildqueue.db ]; then
+            echo "Generating INDEX.json..."
+            ./buildctl generate --output artifacts
+          else
+            echo "No build database found, skipping INDEX.json"
+          fi
+
+          # Generate bincache metadata
+          if [ "${{ inputs.arch }}" = "all" ]; then
+            for arch in x86_64-Linux aarch64-Linux; do
+              echo ""
+              echo "Generating bincache metadata for $arch..."
+              ./buildctl generate --output artifacts --bincache --arch "$arch" --parallel 10 || echo "Warning: bincache generation failed for $arch"
+            done
+          else
+            echo ""
+            echo "Generating bincache metadata for ${{ inputs.arch }}..."
+            ./buildctl generate --output artifacts --bincache --arch "${{ inputs.arch }}" --parallel 10 || echo "Warning: bincache generation failed"
+          fi
+
+          # Generate pkgcache metadata
+          if [ "${{ inputs.arch }}" = "all" ]; then
+            for arch in x86_64-Linux aarch64-Linux; do
+              echo ""
+              echo "Generating pkgcache metadata for $arch..."
+              ./buildctl generate --output artifacts --pkgcache --arch "$arch" --parallel 10 || echo "Warning: pkgcache generation failed for $arch"
+            done
+          else
+            echo ""
+            echo "Generating pkgcache metadata for ${{ inputs.arch }}..."
+            ./buildctl generate --output artifacts --pkgcache --arch "${{ inputs.arch }}" --parallel 10 || echo "Warning: pkgcache generation failed"
+          fi
+
+          echo ""
+          echo "=========================================="
+          echo "Generated metadata files"
+          echo "=========================================="
+          find artifacts -type f | sort
+
+      - name: Upload metadata artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: metadata-artifacts
+          path: artifacts/
+          retention-days: 7
+
+      - name: Create metadata release
+        run: |
+          # Generate tag name
+          TAG="metadata-$(date -u +%Y-%m-%d-%Hh)"
+          echo "Creating release: $TAG"
+
+          # Create release with all metadata files
+          gh release create "$TAG" \
+            --title "Metadata Release - $(date -u +"%Y-%m-%d %H:00 UTC")" \
+            --notes "Automated metadata release from build-system.
+
+          ## Contents
+          - \`INDEX.json\` - Full package metadata (JSON)
+          - \`bincache/\` - Binary cache metadata (JSON, SQLite, compressed)
+          - \`pkgcache/\` - Package cache metadata (JSON, SQLite, compressed)
+
+          Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" \
+            artifacts/**/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "# Metadata Generation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Architecture:** ${{ inputs.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Generated Files" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          find artifacts -type f | sort >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
