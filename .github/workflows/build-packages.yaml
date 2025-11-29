@@ -208,7 +208,7 @@ jobs:
           sudo install -m 755 /tmp/sbuild /usr/local/bin/sbuild
 
           # Verify installation
-          sbuild --version
+          sbuild --help
 
       - name: Login to GHCR
         uses: docker/login-action@v3
