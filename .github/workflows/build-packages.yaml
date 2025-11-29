@@ -103,13 +103,13 @@ jobs:
           fetch-depth: 1
 
       - name: Download buildctl
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: buildctl
           path: .
 
       - name: Download database
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: buildqueue-db-init
           path: build-system
@@ -192,13 +192,13 @@ jobs:
           fetch-depth: 1
 
       - name: Download buildctl
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: buildctl
           path: .
 
       - name: Download database
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: buildqueue-db-queued
           path: build-system
@@ -314,12 +314,12 @@ jobs:
 
     steps:
       - name: Download buildctl
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: buildctl
 
       - name: Download all build databases
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           pattern: buildqueue-db-*
           merge-multiple: false
@@ -371,13 +371,13 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Download buildctl
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: buildctl
           path: .
 
       - name: Download merged database
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: buildqueue-db-final
           path: build-system
@@ -475,7 +475,7 @@ jobs:
 
     steps:
       - name: Download metadata artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: metadata-artifacts
           path: artifacts
@@ -556,12 +556,12 @@ jobs:
 
     steps:
       - name: Download buildctl
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: buildctl
 
       - name: Download final database
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: buildqueue-db-final
 
