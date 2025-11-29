@@ -106,6 +106,17 @@ jobs:
           TAG="metadata-$(date -u +%Y-%m-%d-%Hh)"
           echo "Creating release: $TAG"
 
+          # Find all files to upload
+          FILES=$(find artifacts -type f)
+
+          if [ -z "$FILES" ]; then
+            echo "No files found to upload"
+            exit 1
+          fi
+
+          echo "Files to upload:"
+          echo "$FILES"
+
           # Create release with all metadata files
           gh release create "$TAG" \
             --title "Metadata Release - $(date -u +"%Y-%m-%d %H:00 UTC")" \
@@ -117,7 +128,7 @@ jobs:
           - \`pkgcache/\` - Package cache metadata (JSON, SQLite, compressed)
 
           Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" \
-            artifacts/**/*
+            $FILES
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
