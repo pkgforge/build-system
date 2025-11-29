@@ -69,14 +69,14 @@ jobs:
           echo "Synced $COUNT recipes"
 
       - name: Upload buildctl binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: buildctl
           path: buildctl
           retention-days: 1
 
       - name: Upload database
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: buildqueue-db-init
           path: buildqueue.db
@@ -142,7 +142,7 @@ jobs:
           ./buildctl status
 
       - name: Upload database
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: buildqueue-db-queued
           path: buildqueue.db
@@ -352,7 +352,7 @@ jobs:
 
       - name: Upload database with build results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: buildqueue-db-${{ matrix.arch }}
           path: buildqueue.db
@@ -360,7 +360,7 @@ jobs:
 
       - name: Upload build logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: build-logs-${{ matrix.arch }}
           path: logs/
@@ -402,7 +402,7 @@ jobs:
           ./buildctl stats
 
       - name: Upload merged database
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: buildqueue-db-final
           path: buildqueue.db
@@ -530,7 +530,7 @@ jobs:
           ls -lh
 
       - name: Upload metadata artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: metadata-artifacts
           path: artifacts/
