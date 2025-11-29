@@ -39,8 +39,6 @@ jobs:
     steps:
       - name: Checkout build-system
         uses: actions/checkout@v4
-        with:
-          path: build-system
 
       - name: Checkout soarpkgs
         uses: actions/checkout@v4
@@ -52,18 +50,16 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
-          cache-dependency-path: build-system/go.sum
+          go-version: '1.24'
+          cache-dependency-path: go.sum
 
       - name: Build buildctl
         run: |
-          cd build-system
           go build -o buildctl ./cmd/buildctl
 
       - name: Sync recipes
         id: sync
         run: |
-          cd build-system
           ./buildctl sync --repo "$GITHUB_WORKSPACE/soarpkgs"
 
           # Get recipe count
@@ -75,14 +71,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: buildctl
-          path: build-system/buildctl
+          path: buildctl
           retention-days: 1
 
       - name: Upload database
         uses: actions/upload-artifact@v4
         with:
           name: buildqueue-db-init
-          path: build-system/buildqueue.db
+          path: buildqueue.db
           retention-days: 1
 
   # Step 2: Queue packages for building
@@ -95,8 +91,6 @@ jobs:
     steps:
       - name: Checkout build-system
         uses: actions/checkout@v4
-        with:
-          path: build-system
 
       - name: Checkout soarpkgs
         uses: actions/checkout@v4
@@ -109,7 +103,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: buildctl
-          path: build-system
+          path: .
 
       - name: Download database
         uses: actions/download-artifact@v4
@@ -118,12 +112,10 @@ jobs:
           path: build-system
 
       - name: Make buildctl executable
-        run: chmod +x build-system/buildctl
+        run: chmod +x buildctl
 
       - name: Queue packages
         run: |
-          cd build-system
-
           if [ -n "${{ inputs.force_pkg }}" ]; then
             echo "Force building package: ${{ inputs.force_pkg }}"
 
@@ -152,7 +144,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: buildqueue-db-queued
-          path: build-system/buildqueue.db
+          path: buildqueue.db
           retention-days: 1
 
   # Step 3: Build packages (parallel matrix)
@@ -200,7 +192,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: buildctl
-          path: build-system
+          path: .
 
       - name: Download database
         uses: actions/download-artifact@v4
@@ -209,7 +201,7 @@ jobs:
           path: build-system
 
       - name: Make buildctl executable
-        run: chmod +x build-system/buildctl
+        run: chmod +x buildctl
 
       - name: Setup build environment
         run: |
@@ -234,8 +226,6 @@ jobs:
       - name: Build packages for ${{ matrix.arch }}
         id: build
         run: |
-          cd build-system
-
           # Show what's in the queue
           echo "=== Build Queue Status ==="
           ./buildctl status
@@ -300,7 +290,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: buildqueue-db-${{ matrix.arch }}
-          path: build-system/buildqueue.db
+          path: buildqueue.db
           retention-days: 1
 
       - name: Upload build logs on failure
@@ -308,7 +298,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs-${{ matrix.arch }}
-          path: build-system/logs/
+          path: logs/
           retention-days: 7
 
   # Step 4: Merge build results
@@ -363,8 +353,6 @@ jobs:
     steps:
       - name: Checkout build-system
         uses: actions/checkout@v4
-        with:
-          path: build-system
 
       - name: Checkout soarpkgs
         uses: actions/checkout@v4
@@ -376,14 +364,14 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
-          cache-dependency-path: build-system/go.sum
+          go-version: '1.24'
+          cache-dependency-path: go.sum
 
       - name: Download buildctl
         uses: actions/download-artifact@v4
         with:
           name: buildctl
-          path: build-system
+          path: .
 
       - name: Download merged database
         uses: actions/download-artifact@v4
@@ -392,7 +380,7 @@ jobs:
           path: build-system
 
       - name: Make buildctl executable
-        run: chmod +x build-system/buildctl
+        run: chmod +x buildctl
 
       - name: Install compression tools
         run: |
@@ -401,7 +389,6 @@ jobs:
 
       - name: Generate INDEX.json
         run: |
-          cd build-system
           mkdir -p artifacts
 
           # Generate base INDEX.json
@@ -421,8 +408,6 @@ jobs:
 
       - name: Fetch GHCR download statistics
         run: |
-          cd build-system
-
           # Fetch package download counts from GHCR
           # This enriches metadata with popularity metrics
 
@@ -431,7 +416,7 @@ jobs:
 
       - name: Create metadata variants
         run: |
-          cd build-system/artifacts
+          cd artifacts
 
           # Create SQLite database format
           echo "Creating INDEX.db..."
@@ -473,7 +458,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: metadata-artifacts
-          path: build-system/artifacts/
+          path: artifacts/
           retention-days: 30
 
   # Step 6: Create GitHub Release
