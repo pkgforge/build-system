@@ -1,0 +1,81 @@
+name: Cleanup and Maintenance
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    # Run weekly on Sunday at midnight
+    - cron: '0 0 * * 0'
+
+jobs:
+  cleanup-old-artifacts:
+    name: Cleanup Old Artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          retain_days: 30
+          keep_minimum_runs: 10
+
+  cleanup-old-releases:
+    name: Cleanup Old Releases
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Delete old releases
+        uses: dev-drprasad/delete-older-releases@v0.3.2
+        with:
+          keep_latest: 30
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  vacuum-database:
+    name: Vacuum Database
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build buildctl
+        run: go build -o buildctl ./cmd/buildctl
+
+      - name: Download database
+        run: |
+          gh release download --pattern "buildqueue.db" --repo ${{ github.repository }} || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Vacuum database
+        if: success()
+        run: |
+          if [ -f buildqueue.db ]; then
+            SIZE_BEFORE=$(du -h buildqueue.db | cut -f1)
+            echo "Database size before: $SIZE_BEFORE"
+
+            sqlite3 buildqueue.db "VACUUM;"
+
+            SIZE_AFTER=$(du -h buildqueue.db | cut -f1)
+            echo "Database size after: $SIZE_AFTER"
+
+            # Upload cleaned database
+            gh release upload --clobber "$(gh release list --limit 1 --json tagName -q '.[0].tagName')" buildqueue.db
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

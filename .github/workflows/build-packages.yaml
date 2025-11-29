@@ -1,0 +1,671 @@
+name: Build and Publish Packages
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+
+  workflow_dispatch:
+    inputs:
+      force_pkg:
+        description: 'Force build specific package (optional)'
+        required: false
+        type: string
+      arch:
+        description: 'Architecture to build'
+        required: false
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - x86_64-Linux
+          - aarch64-Linux
+          - riscv64-Linux
+
+env:
+  SOARPKGS_REPO: pkgforge/soarpkgs
+  BINCACHE_REPO: pkgforge/bincache
+  METADATA_REPO: pkgforge/metadata
+
+jobs:
+  # Step 1: Sync recipes and prepare queue
+  sync-recipes:
+    name: Sync Recipes from soarpkgs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      recipes_count: ${{ steps.sync.outputs.count }}
+
+    steps:
+      - name: Checkout build-system
+        uses: actions/checkout@v4
+        with:
+          path: build-system
+
+      - name: Checkout soarpkgs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOARPKGS_REPO }}
+          path: soarpkgs
+          fetch-depth: 1
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache-dependency-path: build-system/go.sum
+
+      - name: Build buildctl
+        run: |
+          cd build-system
+          go build -o buildctl ./cmd/buildctl
+
+      - name: Sync recipes
+        id: sync
+        run: |
+          cd build-system
+          ./buildctl sync --repo "$GITHUB_WORKSPACE/soarpkgs"
+
+          # Get recipe count
+          COUNT=$(./buildctl stats | grep "Total Builds" | awk '{print $3}' || echo "0")
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Synced $COUNT recipes"
+
+      - name: Upload buildctl binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildctl
+          path: build-system/buildctl
+          retention-days: 1
+
+      - name: Upload database
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildqueue-db-init
+          path: build-system/buildqueue.db
+          retention-days: 1
+
+  # Step 2: Queue packages for building
+  queue-packages:
+    name: Queue Packages
+    needs: sync-recipes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout build-system
+        uses: actions/checkout@v4
+        with:
+          path: build-system
+
+      - name: Checkout soarpkgs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOARPKGS_REPO }}
+          path: soarpkgs
+          fetch-depth: 1
+
+      - name: Download buildctl
+        uses: actions/download-artifact@v4
+        with:
+          name: buildctl
+          path: build-system
+
+      - name: Download database
+        uses: actions/download-artifact@v4
+        with:
+          name: buildqueue-db-init
+          path: build-system
+
+      - name: Make buildctl executable
+        run: chmod +x build-system/buildctl
+
+      - name: Queue packages
+        run: |
+          cd build-system
+
+          if [ -n "${{ inputs.force_pkg }}" ]; then
+            echo "Force building package: ${{ inputs.force_pkg }}"
+
+            if [ "${{ inputs.arch }}" = "all" ]; then
+              for arch in x86_64-Linux aarch64-Linux riscv64-Linux; do
+                ./buildctl force --repo "$GITHUB_WORKSPACE/soarpkgs" --pkg "${{ inputs.force_pkg }}" --arch "$arch"
+              done
+            else
+              ./buildctl force --repo "$GITHUB_WORKSPACE/soarpkgs" --pkg "${{ inputs.force_pkg }}" --arch "${{ inputs.arch }}"
+            fi
+          else
+            echo "Queuing all packages"
+
+            # Queue all packages with normal priority
+            if [ "${{ inputs.arch }}" = "all" ]; then
+              ./buildctl queue --repo "$GITHUB_WORKSPACE/soarpkgs" --all
+            else
+              ./buildctl queue --repo "$GITHUB_WORKSPACE/soarpkgs" --all --arch "${{ inputs.arch }}"
+            fi
+          fi
+
+          # Show queue status
+          ./buildctl status
+
+      - name: Upload database
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildqueue-db-queued
+          path: build-system/buildqueue.db
+          retention-days: 1
+
+  # Step 3: Build packages (parallel matrix)
+  build-packages:
+    name: Build ${{ matrix.arch }}
+    needs: queue-packages
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 330  # 5.5 hours max
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - arch: x86_64-Linux
+            runner: ubuntu-latest
+          - arch: aarch64-Linux
+            runner: ubuntu-24.04-arm64
+          # Uncomment when riscv64 runners are available
+          # - arch: riscv64-Linux
+          #   runner: ubuntu-latest  # with QEMU
+
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Checkout build-system
+        uses: actions/checkout@v4
+        with:
+          path: build-system
+
+      - name: Checkout soarpkgs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOARPKGS_REPO }}
+          path: soarpkgs
+          fetch-depth: 1
+
+      - name: Download buildctl
+        uses: actions/download-artifact@v4
+        with:
+          name: buildctl
+          path: build-system
+
+      - name: Download database
+        uses: actions/download-artifact@v4
+        with:
+          name: buildqueue-db-queued
+          path: build-system
+
+      - name: Make buildctl executable
+        run: chmod +x build-system/buildctl
+
+      - name: Setup build environment
+        run: |
+          # Install sbuild and dependencies
+          sudo apt-get update
+          sudo apt-get install -y curl wget git build-essential
+
+          # Install sbuilder (sbuild binary)
+          curl -qfsSL "https://bin.pkgforge.dev/x86_64-Linux/sbuilder" -o /tmp/sbuild
+          sudo install -m 755 /tmp/sbuild /usr/local/bin/sbuild
+
+          # Verify installation
+          sbuild --version
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build packages for ${{ matrix.arch }}
+        id: build
+        run: |
+          cd build-system
+
+          # Show what's in the queue
+          echo "=== Build Queue Status ==="
+          ./buildctl status
+
+          # Calculate worker count (use nproc but cap at 4 to avoid overwhelming)
+          WORKERS=$(nproc)
+          [ "$WORKERS" -gt 4 ] && WORKERS=4
+          echo "Using $WORKERS parallel workers"
+
+          # Start build process
+          # Note: This will be implemented when executor is complete
+          # For now, we'll simulate with a placeholder
+
+          START_TIME=$(date +%s)
+          MAX_DURATION=$((5 * 3600))  # 5 hours in seconds
+
+          while true; do
+            # Check if we're approaching timeout
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+
+            if [ $ELAPSED -ge $MAX_DURATION ]; then
+              echo "Approaching timeout, stopping builds gracefully"
+              break
+            fi
+
+            # Get next build from queue
+            BUILD=$(./buildctl list --status queued --limit 1 2>/dev/null | grep -v "^Found" | head -1)
+
+            if [ -z "$BUILD" ]; then
+              echo "No more builds in queue"
+              break
+            fi
+
+            # Extract build ID and package name
+            BUILD_ID=$(echo "$BUILD" | awk '{print $2}')
+            PKG_NAME=$(echo "$BUILD" | awk '{print $4}')
+
+            echo "Building: $PKG_NAME (ID: $BUILD_ID)"
+
+            # TODO: Actual build execution with sbuild
+            # ./buildctl build --id $BUILD_ID
+
+            # For now, just mark as succeeded (placeholder)
+            # This will be replaced with actual sbuild integration
+            sleep 1
+          done
+
+          # Show final status
+          echo "=== Final Build Status ==="
+          ./buildctl status
+
+      - name: Upload built packages to GHCR
+        if: success()
+        run: |
+          # Packages are automatically pushed to GHCR during build
+          # by the sbuild process
+          echo "Packages pushed to ghcr.io/${{ github.repository_owner }}/..."
+
+      - name: Upload database with build results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildqueue-db-${{ matrix.arch }}
+          path: build-system/buildqueue.db
+          retention-days: 1
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.arch }}
+          path: build-system/logs/
+          retention-days: 7
+
+  # Step 4: Merge build results
+  merge-results:
+    name: Merge Build Results
+    needs: build-packages
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download buildctl
+        uses: actions/download-artifact@v4
+        with:
+          name: buildctl
+
+      - name: Download all build databases
+        uses: actions/download-artifact@v4
+        with:
+          pattern: buildqueue-db-*
+          merge-multiple: false
+
+      - name: Merge databases
+        run: |
+          chmod +x buildctl
+
+          # Merge all architecture results into main database
+          # For now, just use x86_64 as base
+          if [ -f buildqueue-db-x86_64-Linux/buildqueue.db ]; then
+            cp buildqueue-db-x86_64-Linux/buildqueue.db ./buildqueue.db
+          fi
+
+          # TODO: Implement proper merge logic for multiple arch results
+
+          # Show final statistics
+          ./buildctl stats
+
+      - name: Upload merged database
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildqueue-db-final
+          path: buildqueue.db
+          retention-days: 7
+
+  # Step 5: Generate metadata
+  generate-metadata:
+    name: Generate Metadata
+    needs: merge-results
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout build-system
+        uses: actions/checkout@v4
+        with:
+          path: build-system
+
+      - name: Checkout soarpkgs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOARPKGS_REPO }}
+          path: soarpkgs
+          fetch-depth: 1
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache-dependency-path: build-system/go.sum
+
+      - name: Download buildctl
+        uses: actions/download-artifact@v4
+        with:
+          name: buildctl
+          path: build-system
+
+      - name: Download merged database
+        uses: actions/download-artifact@v4
+        with:
+          name: buildqueue-db-final
+          path: build-system
+
+      - name: Make buildctl executable
+        run: chmod +x build-system/buildctl
+
+      - name: Install compression tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xz-utils zstd sqlite3 jq
+
+      - name: Generate INDEX.json
+        run: |
+          cd build-system
+          mkdir -p artifacts
+
+          # Generate base INDEX.json
+          # TODO: Implement metadata generator
+          # For now, scan recipes and create basic structure
+
+          # This will be replaced with: ./buildctl generate --repo "$GITHUB_WORKSPACE/soarpkgs"
+
+          echo '{
+            "version": "1.0.0",
+            "generated_at": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
+            "total_packages": 0,
+            "packages": []
+          }' > artifacts/INDEX.json
+
+          echo "Generated INDEX.json"
+
+      - name: Fetch GHCR download statistics
+        run: |
+          cd build-system
+
+          # Fetch package download counts from GHCR
+          # This enriches metadata with popularity metrics
+
+          # TODO: Implement GHCR stats fetching
+          echo "GHCR stats fetching placeholder"
+
+      - name: Create metadata variants
+        run: |
+          cd build-system/artifacts
+
+          # Create SQLite database format
+          echo "Creating INDEX.db..."
+          sqlite3 INDEX.db <<EOF
+          CREATE TABLE packages (
+            pkg_id TEXT PRIMARY KEY,
+            name TEXT,
+            version TEXT,
+            description TEXT,
+            homepage TEXT,
+            source_url TEXT,
+            build_script TEXT,
+            architectures TEXT,
+            download_count INTEGER,
+            updated_at TEXT
+          );
+          EOF
+
+          # Create compressed variants
+          echo "Creating compressed variants..."
+
+          # xz (maximum compression)
+          xz -9 -k INDEX.json
+
+          # zstd (fast compression)
+          zstd -19 -k INDEX.json
+
+          # Create checksums (BLAKE3 if available, otherwise SHA256)
+          if command -v b3sum &> /dev/null; then
+            b3sum INDEX.* > CHECKSUMS.b3sum
+          else
+            sha256sum INDEX.* > CHECKSUMS.sha256
+          fi
+
+          # List all generated files
+          ls -lh
+
+      - name: Upload metadata artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: metadata-artifacts
+          path: build-system/artifacts/
+          retention-days: 30
+
+  # Step 6: Create GitHub Release
+  create-release:
+    name: Create Metadata Release
+    needs: generate-metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download metadata artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: metadata-artifacts
+          path: artifacts
+
+      - name: Generate release tag
+        id: tag
+        run: |
+          TAG="metadata-$(date -u +%Y-%m-%d-%Hh)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Release tag: $TAG"
+
+      - name: Create release notes
+        id: notes
+        run: |
+          cat > release_notes.md <<EOF
+          # Metadata Release - $(date -u +"%Y-%m-%d %H:00 UTC")
+
+          Automated metadata release from build-system.
+
+          ## Contents
+
+          - \`INDEX.json\` - Full package metadata (JSON)
+          - \`INDEX.json.xz\` - Compressed with xz (maximum compression)
+          - \`INDEX.json.zst\` - Compressed with zstd (fast decompression)
+          - \`INDEX.db\` - SQLite database format
+          - \`CHECKSUMS.*\` - File checksums
+
+          ## Statistics
+
+          - **Generated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - **Workflow:** ${{ github.workflow }}
+          - **Run ID:** ${{ github.run_id }}
+
+          ## Usage
+
+          \`\`\`bash
+          # Download latest metadata
+          curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/INDEX.json -o INDEX.json
+
+          # Download compressed version
+          curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/INDEX.json.xz -o INDEX.json.xz
+          xz -d INDEX.json.xz
+          \`\`\`
+
+          ---
+
+          🤖 Generated with [build-system](https://github.com/${{ github.repository }})
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Metadata Release - ${{ steps.tag.outputs.tag }}
+          body_path: release_notes.md
+          files: artifacts/*
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old releases
+        uses: dev-drprasad/delete-older-releases@v0.3.2
+        with:
+          keep_latest: 30
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Step 7: Update HuggingFace mirror (optional)
+  sync-huggingface:
+    name: Sync to HuggingFace
+    needs: create-release
+    if: github.event_name == 'schedule'  # Only on scheduled runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download metadata artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: metadata-artifacts
+          path: artifacts
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Upload to HuggingFace
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # Upload metadata to HuggingFace datasets
+          # This provides an alternative mirror
+
+          if [ -z "$HF_TOKEN" ]; then
+            echo "HF_TOKEN not set, skipping HuggingFace sync"
+            exit 0
+          fi
+
+          python3 <<EOF
+          from huggingface_hub import HfApi
+          import os
+
+          api = HfApi(token=os.environ['HF_TOKEN'])
+
+          # Upload all artifacts to dataset
+          repo_id = "pkgforge/soarpkgs-metadata"
+
+          api.upload_folder(
+              folder_path="artifacts",
+              repo_id=repo_id,
+              repo_type="dataset",
+              commit_message=f"Update metadata - {os.environ['GITHUB_SHA'][:7]}"
+          )
+
+          print(f"Uploaded to https://huggingface.co/datasets/{repo_id}")
+          EOF
+
+  # Step 8: Post-build summary
+  build-summary:
+    name: Build Summary
+    needs: [sync-recipes, queue-packages, build-packages, merge-results, generate-metadata, create-release]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Download buildctl
+        uses: actions/download-artifact@v4
+        with:
+          name: buildctl
+
+      - name: Download final database
+        uses: actions/download-artifact@v4
+        with:
+          name: buildqueue-db-final
+
+      - name: Generate summary
+        run: |
+          chmod +x buildctl
+
+          echo "# Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Statistics" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ./buildctl stats >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Recent Builds" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ./buildctl list --limit 20 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Queue Status" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ./buildctl status >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment on PR (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });

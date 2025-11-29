@@ -1,0 +1,114 @@
+name: Quick Package Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: 'Comma-separated list of packages to build (e.g., btop,neofetch,htop)'
+        required: true
+        type: string
+      arch:
+        description: 'Architecture to build'
+        required: false
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - x86_64-Linux
+          - aarch64-Linux
+          - riscv64-Linux
+      priority:
+        description: 'Build priority (higher = built first)'
+        required: false
+        default: '50'
+        type: string
+
+jobs:
+  quick-build:
+    name: Quick Build - ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64-Linux
+            runner: ubuntu-latest
+          - arch: aarch64-Linux
+            runner: ubuntu-24.04-arm64
+
+    steps:
+      - name: Checkout build-system
+        uses: actions/checkout@v4
+        with:
+          path: build-system
+
+      - name: Checkout soarpkgs
+        uses: actions/checkout@v4
+        with:
+          repository: pkgforge/soarpkgs
+          path: soarpkgs
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build buildctl
+        run: |
+          cd build-system
+          go build -o buildctl ./cmd/buildctl
+
+      - name: Setup build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl wget git
+
+          # Install sbuild
+          curl -qfsSL "https://bin.pkgforge.dev/${{ matrix.arch }}/sbuilder" -o /tmp/sbuild
+          sudo install -m 755 /tmp/sbuild /usr/local/bin/sbuild
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Queue and build packages
+        run: |
+          cd build-system
+
+          # Parse comma-separated packages
+          IFS=',' read -ra PKGS <<< "${{ inputs.packages }}"
+
+          for pkg in "${PKGS[@]}"; do
+            pkg=$(echo "$pkg" | xargs)  # trim whitespace
+
+            if [ "${{ inputs.arch }}" = "all" ] || [ "${{ inputs.arch }}" = "${{ matrix.arch }}" ]; then
+              echo "Queuing: $pkg for ${{ matrix.arch }}"
+              ./buildctl sync --repo "$GITHUB_WORKSPACE/soarpkgs"
+              ./buildctl force --repo "$GITHUB_WORKSPACE/soarpkgs" --pkg "$pkg" --arch "${{ matrix.arch }}"
+            fi
+          done
+
+          # Show queue
+          ./buildctl status
+
+          # Build queued packages
+          # TODO: Implement actual build execution
+          echo "Building packages..."
+
+      - name: Create summary
+        if: always()
+        run: |
+          cd build-system
+
+          echo "# Quick Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Packages:** ${{ inputs.packages }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Architecture:** ${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ./buildctl status >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
