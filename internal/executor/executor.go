@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/pkgforge/build-system/internal/ghcr"
 	"github.com/pkgforge/build-system/internal/queue"
 	"github.com/pkgforge/build-system/pkg/models"
 )
@@ -113,7 +114,8 @@ func (e *Executor) ExecuteBuild(build *models.Build) error {
 	defer logWriter.Close()
 
 	// Run sbuild
-	if err := e.runSbuild(build, logWriter); err != nil {
+	outDir := filepath.Join(e.workDir, "artifacts")
+	if err := e.runSbuild(build, logWriter, outDir); err != nil {
 		duration := int(time.Since(startTime).Seconds())
 
 		// Read error from log
@@ -132,6 +134,17 @@ func (e *Executor) ExecuteBuild(build *models.Build) error {
 		return err
 	}
 
+	// Upload to GHCR
+	fmt.Printf("  ↑ Uploading to GHCR...\n")
+	uploader := ghcr.NewUploader()
+
+	// sbuild creates a directory named {pkg_id} inside outdir
+	pkgDir := filepath.Join(outDir, build.PkgID)
+	if err := uploader.UploadPackage(build, pkgDir); err != nil {
+		// Don't fail the build, just log the error
+		fmt.Printf("  ⚠ Warning: Failed to upload to GHCR: %v\n", err)
+	}
+
 	// Mark as succeeded
 	duration := int(time.Since(startTime).Seconds())
 	if err := e.qm.UpdateStatus(build.ID, models.StatusSucceeded, ""); err != nil {
@@ -143,7 +156,7 @@ func (e *Executor) ExecuteBuild(build *models.Build) error {
 }
 
 // runSbuild executes the sbuild command
-func (e *Executor) runSbuild(build *models.Build, logWriter io.Writer) error {
+func (e *Executor) runSbuild(build *models.Build, logWriter io.Writer, outDir string) error {
 	// Check if sbuild exists
 	if _, err := exec.LookPath(e.sbuildPath); err != nil {
 		return fmt.Errorf("sbuild not found at %s: %w", e.sbuildPath, err)
@@ -157,9 +170,17 @@ func (e *Executor) runSbuild(build *models.Build, logWriter io.Writer) error {
 		return fmt.Errorf("recipe file not found: %s: %w", recipePath, err)
 	}
 
-	// Prepare sbuild command
-	// sbuild typically takes: sbuild <recipe.yaml>
-	args := []string{recipePath}
+	// Create output directory for build artifacts
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Prepare sbuild command with --outdir flag
+	// sbuild creates a directory named {pkg_id} inside outdir
+	args := []string{
+		"--outdir", outDir,
+		recipePath,
+	}
 
 	cmd := exec.Command(e.sbuildPath, args...)
 	cmd.Dir = e.workDir

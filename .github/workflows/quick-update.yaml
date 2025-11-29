@@ -38,25 +38,41 @@ jobs:
             runner: ubuntu-24.04-arm64
 
     steps:
+      - name: Check if architecture should run
+        id: check_arch
+        run: |
+          if [ "${{ inputs.arch }}" != "all" ] && [ "${{ inputs.arch }}" != "${{ matrix.arch }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Skipping ${{ matrix.arch }} - not selected (selected: ${{ inputs.arch }})"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "Running ${{ matrix.arch }}"
+          fi
+
       - name: Checkout build-system
+        if: steps.check_arch.outputs.skip != 'true'
         uses: actions/checkout@v4
 
       - name: Checkout soarpkgs
+        if: steps.check_arch.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           repository: pkgforge/soarpkgs
           path: soarpkgs
 
       - name: Setup Go
+        if: steps.check_arch.outputs.skip != 'true'
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
 
       - name: Build buildctl
+        if: steps.check_arch.outputs.skip != 'true'
         run: |
           go build -o buildctl ./cmd/buildctl
 
       - name: Setup build environment
+        if: steps.check_arch.outputs.skip != 'true'
         run: |
           echo "Installing system dependencies..."
           sudo apt-get update
@@ -110,6 +126,17 @@ jobs:
           sudo install -m 755 /tmp/appimagetool /usr/local/bin/appimagetool
           appimagetool --version || echo "appimagetool installed"
 
+          # Install oras (OCI Registry As Storage - for GHCR uploads)
+          echo "- Installing oras..."
+          ORAS_VERSION="1.2.0"
+          ORAS_ARCH="${{ matrix.arch }}"
+          ORAS_ARCH="${ORAS_ARCH//-Linux/}"
+          ORAS_ARCH="${ORAS_ARCH,,}"
+          curl -qfsSL "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_${ORAS_ARCH}.tar.gz" -o /tmp/oras.tar.gz
+          tar -xzf /tmp/oras.tar.gz -C /tmp
+          sudo install -m 755 /tmp/oras /usr/local/bin/oras
+          oras version || echo "oras installed"
+
           # Install sbuild (build tool)
           echo "- Installing sbuild..."
           curl -qfsSL "https://github.com/pkgforge/sbuilder/releases/download/v0.1.10-sbuild/sbuild-x86_64-linux" -o /tmp/sbuild
@@ -120,6 +147,7 @@ jobs:
           echo "✓ Build environment ready"
 
       - name: Login to GHCR
+        if: steps.check_arch.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -127,13 +155,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Queue and build packages
+        if: steps.check_arch.outputs.skip != 'true'
         run: |
-          # Skip if this architecture was not selected
-          if [ "${{ inputs.arch }}" != "all" ] && [ "${{ inputs.arch }}" != "${{ matrix.arch }}" ]; then
-            echo "Skipping ${{ matrix.arch }} - not selected (selected: ${{ inputs.arch }})"
-            exit 0
-          fi
-
           # Parse comma-separated packages
           IFS=',' read -ra PKGS <<< "${{ inputs.packages }}"
 
@@ -185,9 +208,8 @@ jobs:
           ./buildctl status
 
       - name: Create summary
-        if: always()
+        if: always() && steps.check_arch.outputs.skip != 'true'
         run: |
-
           echo "# Quick Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Packages:** ${{ inputs.packages }}" >> $GITHUB_STEP_SUMMARY

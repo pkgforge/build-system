@@ -249,6 +249,17 @@ jobs:
           sudo install -m 755 /tmp/appimagetool /usr/local/bin/appimagetool
           appimagetool --version || echo "appimagetool installed"
 
+          # Install oras (OCI Registry As Storage - for GHCR uploads)
+          echo "- Installing oras..."
+          ORAS_VERSION="1.2.0"
+          ORAS_ARCH="${{ matrix.arch }}"
+          ORAS_ARCH="${ORAS_ARCH//-Linux/}"
+          ORAS_ARCH="${ORAS_ARCH,,}"
+          curl -qfsSL "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_${ORAS_ARCH}.tar.gz" -o /tmp/oras.tar.gz
+          tar -xzf /tmp/oras.tar.gz -C /tmp
+          sudo install -m 755 /tmp/oras /usr/local/bin/oras
+          oras version || echo "oras installed"
+
           # Install sbuild (build tool)
           echo "- Installing sbuild..."
           curl -qfsSL "https://github.com/pkgforge/sbuilder/releases/download/v0.1.10-sbuild/sbuild-x86_64-linux" -o /tmp/sbuild
