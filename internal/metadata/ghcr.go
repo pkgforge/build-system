@@ -80,6 +80,9 @@ func FetchGHCRPackages() ([]GHCRPackage, error) {
 // getGitHubToken retrieves GitHub token from environment
 func getGitHubToken() string {
 	// Try common environment variable names
+	if token := os.Getenv("GHCR_TOKEN"); token != "" {
+		return token
+	}
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 		return token
 	}
