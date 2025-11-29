@@ -93,9 +93,14 @@ jobs:
           sudo install -m 755 /tmp/yq /usr/local/bin/yq
           yq --version || echo "yq installed"
 
-          # Install squishy-cli (AppImage manipulation tool)
-          echo "- Installing squishy-cli via soar..."
-          soar add squishy-cli --yes || echo "squishy-cli installation failed (non-fatal)"
+          # Install squishy (AppImage manipulation tool)
+          echo "- Installing squishy..."
+          SQUISHY_ARCH="${{ matrix.arch }}"
+          SQUISHY_ARCH="${SQUISHY_ARCH//-Linux/}"
+          SQUISHY_ARCH="${SQUISHY_ARCH,,}"  # Convert to lowercase
+          curl -qfsSL "https://github.com/pkgforge/squishy-rs/releases/download/v0.3.1/squishy-${SQUISHY_ARCH}-linux" -o /tmp/squishy
+          sudo install -m 755 /tmp/squishy /usr/local/bin/squishy-cli
+          squishy-cli --version || echo "squishy-cli installed"
 
           # Install sbuild (build tool)
           echo "- Installing sbuild..."
