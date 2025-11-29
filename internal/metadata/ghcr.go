@@ -33,10 +33,12 @@ func FetchGHCRPackages() ([]GHCRPackage, error) {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
 
-		// Add GitHub token if available for higher rate limits
-		if token := getGitHubToken(); token != "" {
-			req.Header.Set("Authorization", "token "+token)
+		// GitHub token is required for org packages API
+		token := getGitHubToken()
+		if token == "" {
+			return nil, fmt.Errorf("GITHUB_TOKEN environment variable is required to query org packages")
 		}
+		req.Header.Set("Authorization", "token "+token)
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
