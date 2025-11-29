@@ -28,7 +28,6 @@ jobs:
     name: Quick Build - ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    if: ${{ inputs.arch == 'all' || inputs.arch == matrix.arch }}
     strategy:
       fail-fast: false
       matrix:
@@ -129,18 +128,20 @@ jobs:
 
       - name: Queue and build packages
         run: |
+          # Skip if this architecture was not selected
+          if [ "${{ inputs.arch }}" != "all" ] && [ "${{ inputs.arch }}" != "${{ matrix.arch }}" ]; then
+            echo "Skipping ${{ matrix.arch }} - not selected (selected: ${{ inputs.arch }})"
+            exit 0
+          fi
 
           # Parse comma-separated packages
           IFS=',' read -ra PKGS <<< "${{ inputs.packages }}"
 
           for pkg in "${PKGS[@]}"; do
             pkg=$(echo "$pkg" | xargs)  # trim whitespace
-
-            if [ "${{ inputs.arch }}" = "all" ] || [ "${{ inputs.arch }}" = "${{ matrix.arch }}" ]; then
-              echo "Queuing: $pkg for ${{ matrix.arch }}"
-              ./buildctl sync --repo "$GITHUB_WORKSPACE/soarpkgs"
-              ./buildctl force --repo "$GITHUB_WORKSPACE/soarpkgs" --pkg "$pkg" --arch "${{ matrix.arch }}"
-            fi
+            echo "Queuing: $pkg for ${{ matrix.arch }}"
+            ./buildctl sync --repo "$GITHUB_WORKSPACE/soarpkgs"
+            ./buildctl force --repo "$GITHUB_WORKSPACE/soarpkgs" --pkg "$pkg" --arch "${{ matrix.arch }}"
           done
 
           # Show queue
