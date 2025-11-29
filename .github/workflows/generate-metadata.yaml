@@ -65,26 +65,46 @@ jobs:
           if [ "${{ inputs.arch }}" = "all" ]; then
             for arch in x86_64-Linux aarch64-Linux; do
               echo ""
+              echo "=========================================="
               echo "Generating bincache metadata for $arch..."
-              ./buildctl generate --output artifacts --bincache --arch "$arch" --parallel 10 || echo "Warning: bincache generation failed for $arch"
+              echo "=========================================="
+              if ! ./buildctl generate --output artifacts --bincache --arch "$arch" --parallel 10; then
+                echo "❌ ERROR: bincache generation failed for $arch"
+                echo "Check logs above for details"
+              fi
             done
           else
             echo ""
+            echo "=========================================="
             echo "Generating bincache metadata for ${{ inputs.arch }}..."
-            ./buildctl generate --output artifacts --bincache --arch "${{ inputs.arch }}" --parallel 10 || echo "Warning: bincache generation failed"
+            echo "=========================================="
+            if ! ./buildctl generate --output artifacts --bincache --arch "${{ inputs.arch }}" --parallel 10; then
+              echo "❌ ERROR: bincache generation failed"
+              echo "Check logs above for details"
+            fi
           fi
 
           # Generate pkgcache metadata
           if [ "${{ inputs.arch }}" = "all" ]; then
             for arch in x86_64-Linux aarch64-Linux; do
               echo ""
+              echo "=========================================="
               echo "Generating pkgcache metadata for $arch..."
-              ./buildctl generate --output artifacts --pkgcache --arch "$arch" --parallel 10 || echo "Warning: pkgcache generation failed for $arch"
+              echo "=========================================="
+              if ! ./buildctl generate --output artifacts --pkgcache --arch "$arch" --parallel 10; then
+                echo "❌ ERROR: pkgcache generation failed for $arch"
+                echo "Check logs above for details"
+              fi
             done
           else
             echo ""
+            echo "=========================================="
             echo "Generating pkgcache metadata for ${{ inputs.arch }}..."
-            ./buildctl generate --output artifacts --pkgcache --arch "${{ inputs.arch }}" --parallel 10 || echo "Warning: pkgcache generation failed"
+            echo "=========================================="
+            if ! ./buildctl generate --output artifacts --pkgcache --arch "${{ inputs.arch }}" --parallel 10; then
+              echo "❌ ERROR: pkgcache generation failed"
+              echo "Check logs above for details"
+            fi
           fi
 
           echo ""
