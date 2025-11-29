@@ -55,6 +55,9 @@ jobs:
 
       - name: Build buildctl
         run: |
+          pwd
+          ls -la
+          test -d cmd/buildctl || (echo "cmd/buildctl not found!"; exit 1)
           go build -o buildctl ./cmd/buildctl
 
       - name: Sync recipes
@@ -543,61 +546,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Step 7: Update HuggingFace mirror (optional)
-  sync-huggingface:
-    name: Sync to HuggingFace
-    needs: create-release
-    if: github.event_name == 'schedule'  # Only on scheduled runs
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Download metadata artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: metadata-artifacts
-          path: artifacts
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install huggingface_hub
-        run: pip install huggingface_hub
-
-      - name: Upload to HuggingFace
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          # Upload metadata to HuggingFace datasets
-          # This provides an alternative mirror
-
-          if [ -z "$HF_TOKEN" ]; then
-            echo "HF_TOKEN not set, skipping HuggingFace sync"
-            exit 0
-          fi
-
-          python3 <<EOF
-          from huggingface_hub import HfApi
-          import os
-
-          api = HfApi(token=os.environ['HF_TOKEN'])
-
-          # Upload all artifacts to dataset
-          repo_id = "pkgforge/soarpkgs-metadata"
-
-          api.upload_folder(
-              folder_path="artifacts",
-              repo_id=repo_id,
-              repo_type="dataset",
-              commit_message=f"Update metadata - {os.environ['GITHUB_SHA'][:7]}"
-          )
-
-          print(f"Uploaded to https://huggingface.co/datasets/{repo_id}")
-          EOF
-
-  # Step 8: Post-build summary
+  # Step 7: Post-build summary
   build-summary:
     name: Build Summary
     needs: [sync-recipes, queue-packages, build-packages, merge-results, generate-metadata, create-release]
