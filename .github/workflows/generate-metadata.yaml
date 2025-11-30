@@ -184,6 +184,35 @@ jobs:
           path: artifacts/
           retention-days: 7
 
+      - name: Prepare files for release
+        run: |
+          echo "Flattening directory structure for release upload..."
+          mkdir -p release-files
+
+          # Copy and rename files to avoid conflicts
+          # INDEX.json and SBUILD_LIST files at root
+          [ -f artifacts/INDEX.json ] && cp artifacts/INDEX.json release-files/
+          [ -f artifacts/stats.json ] && cp artifacts/stats.json release-files/
+          [ -f artifacts/bincache-SBUILD_LIST.json ] && cp artifacts/bincache-SBUILD_LIST.json release-files/
+          [ -f artifacts/pkgcache-SBUILD_LIST.json ] && cp artifacts/pkgcache-SBUILD_LIST.json release-files/
+
+          # Rename bincache files with prefix
+          if [ -d artifacts/bincache/data ]; then
+            for file in artifacts/bincache/data/*; do
+              [ -f "$file" ] && cp "$file" "release-files/bincache-$(basename "$file")"
+            done
+          fi
+
+          # Rename pkgcache files with prefix
+          if [ -d artifacts/pkgcache/data ]; then
+            for file in artifacts/pkgcache/data/*; do
+              [ -f "$file" ] && cp "$file" "release-files/pkgcache-$(basename "$file")"
+            done
+          fi
+
+          echo "Files prepared for release:"
+          ls -lh release-files/
+
       - name: Create metadata release
         run: |
           # Generate tag name
@@ -191,7 +220,7 @@ jobs:
           echo "Creating release: $TAG"
 
           # Find all files to upload
-          FILES=$(find artifacts -type f)
+          FILES=$(find release-files -type f)
 
           if [ -z "$FILES" ]; then
             echo "No files found to upload"
@@ -201,35 +230,21 @@ jobs:
           echo "Files to upload:"
           echo "$FILES"
 
-          # Count signature files
-          SIG_COUNT=$(find artifacts -type f -name "*.sig" | wc -l)
-
           # Create release with all metadata files
           gh release create "$TAG" \
             --title "Metadata Release - $(date -u +"%Y-%m-%d %H:00 UTC")" \
             --notes "Automated metadata release from build-system.
 
-          ## 🔐 All files are cryptographically signed with minisign ($SIG_COUNT signatures)
-
           ## Contents
           - \`INDEX.json\` - Full package metadata
-          - \`bincache/\` - Binary cache metadata (JSON, SQLite, compressed)
-          - \`pkgcache/\` - Package cache metadata (JSON, SQLite, compressed)
-          - \`bincache-SBUILD_LIST.json\` - Bincache package list
-          - \`pkgcache-SBUILD_LIST.json\` - Pkgcache package list
-          - \`*.sig\` - Minisign signatures for ALL files
-
-          ## Signature Verification
-          \`\`\`bash
-          # Download public key from repo
-          curl -fsSL -o minisign.pub https://raw.githubusercontent.com/pkgforge/build-system/main/keys/minisign.pub
-
-          # Verify any file (signature must have .sig extension)
-          minisign -V -p minisign.pub -m <filename> -x <filename>.sig
-
-          # Example:
-          minisign -V -p minisign.pub -m bincache-SBUILD_LIST.json -x bincache-SBUILD_LIST.json.sig
-          \`\`\`
+          - \`bincache-*.db*\` - Bincache SQLite database (plain, xz, zstd compressed)
+          - \`bincache-*.json*\` - Bincache JSON metadata (plain, xz compressed)
+          - \`bincache-*.zstd*\` - Bincache zstd compressed data
+          - \`pkgcache-*.db*\` - Pkgcache SQLite database (plain, xz, zstd compressed)
+          - \`pkgcache-*.json*\` - Pkgcache JSON metadata (plain, xz compressed)
+          - \`pkgcache-*.zstd*\` - Pkgcache zstd compressed data
+          - \`*-SBUILD_LIST.json\` - Package lists for bincache and pkgcache
+          - \`*.bsum\` - BLAKE3 checksums for all files
 
           Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" \
             $FILES
@@ -244,30 +259,19 @@ jobs:
           echo "**Architecture:** ${{ inputs.arch }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Count files and signatures
-          FILE_COUNT=$(find artifacts -type f ! -name "*.sig" | wc -l)
-          SIG_COUNT=$(find artifacts -type f -name "*.sig" | wc -l)
-
-          echo "## 🔐 Cryptographic Signatures" >> $GITHUB_STEP_SUMMARY
-          echo "- **Files generated**: $FILE_COUNT" >> $GITHUB_STEP_SUMMARY
-          echo "- **Signatures created**: $SIG_COUNT" >> $GITHUB_STEP_SUMMARY
-          if [ "$FILE_COUNT" -eq "$SIG_COUNT" ]; then
-            echo "- ✅ **All files signed**" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- ⚠️ **Warning**: Not all files have signatures" >> $GITHUB_STEP_SUMMARY
-          fi
+          # Count files
+          FILE_COUNT=$(find artifacts -type f | wc -l)
+          echo "**Files generated**: $FILE_COUNT" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           echo "## SBUILD_LIST Files" >> $GITHUB_STEP_SUMMARY
           if [ -f artifacts/bincache-SBUILD_LIST.json ]; then
             BINCACHE_COUNT=$(jq '. | length' artifacts/bincache-SBUILD_LIST.json 2>/dev/null || echo "?")
             echo "- ✅ bincache-SBUILD_LIST.json ($BINCACHE_COUNT packages)" >> $GITHUB_STEP_SUMMARY
-            [ -f artifacts/bincache-SBUILD_LIST.json.sig ] && echo "  - 🔐 Signed" >> $GITHUB_STEP_SUMMARY
           fi
           if [ -f artifacts/pkgcache-SBUILD_LIST.json ]; then
             PKGCACHE_COUNT=$(jq '. | length' artifacts/pkgcache-SBUILD_LIST.json 2>/dev/null || echo "?")
             echo "- ✅ pkgcache-SBUILD_LIST.json ($PKGCACHE_COUNT packages)" >> $GITHUB_STEP_SUMMARY
-            [ -f artifacts/pkgcache-SBUILD_LIST.json.sig ] && echo "  - 🔐 Signed" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
 
