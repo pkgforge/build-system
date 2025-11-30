@@ -173,6 +173,7 @@ func (u *Uploader) determineUploadTargets(pkgInfo *PackageInfo) []string {
 }
 
 // uploadSinglePackage uploads a single package variant to GHCR
+// Only uploads the specific binary for this variant + shared files (not other binaries)
 func (u *Uploader) uploadSinglePackage(build *models.Build, pkgDir string, pkgInfo *PackageInfo, targetName string, files []string) error {
 	// Determine repository based on recipe path
 	repo := u.determineRepo(build.RecipePath)
@@ -202,15 +203,39 @@ func (u *Uploader) uploadSinglePackage(build *models.Build, pkgDir string, pkgIn
 	// Build oras push command with all files and annotations
 	args := u.buildOrasPushCommand(imageName, pkgInfo, build, targetName)
 
-	// Add all files from the package directory as relative paths
+	// Filter files: only include the specific binary + shared/metadata files
+	// Don't include other binaries from the provides list
 	for _, file := range files {
 		// Skip directories
 		fileInfo, err := os.Stat(file)
 		if err != nil || fileInfo.IsDir() {
 			continue
 		}
-		// Use just the filename (will be relative since we set cmd.Dir)
-		args = append(args, filepath.Base(file))
+
+		fileName := filepath.Base(file)
+
+		// Check if this file is a binary from provides (but not the target binary)
+		isOtherBinary := false
+		if len(pkgInfo.Provides) > 1 {
+			for _, providedBinary := range pkgInfo.Provides {
+				// If this file matches a provided binary name (not our target) and has no extension
+				if fileName == providedBinary && providedBinary != targetName && !strings.Contains(fileName, ".") {
+					isOtherBinary = true
+					break
+				}
+			}
+		}
+
+		// Skip other binaries, but include:
+		// - The target binary itself
+		// - Any file with an extension (.json, .log, .sig, .version, etc.)
+		// - Common shared files (LICENSE, CHECKSUM, SBUILD, README, etc.)
+		if isOtherBinary {
+			continue // Skip this binary, it belongs to another variant
+		}
+
+		// Include this file
+		args = append(args, fileName)
 	}
 
 	cmd := exec.Command(u.orasPath, args...)
