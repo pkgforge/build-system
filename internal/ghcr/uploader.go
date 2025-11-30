@@ -318,40 +318,102 @@ func (u *Uploader) extractPackageInfo(build *models.Build, pkgDir string) (*Pack
 }
 
 // generateMetadataJSON creates a metadata JSON file for the package
+// This generates a separate JSON for each target (to handle multiple provides)
 func (u *Uploader) generateMetadataJSON(pkgInfo *PackageInfo, pkgDir string, build *models.Build) error {
 	// Check if metadata JSON already exists
 	jsonFiles, _ := filepath.Glob(filepath.Join(pkgDir, "*.json"))
-	for _, jsonFile := range jsonFiles {
-		if !strings.HasSuffix(jsonFile, ".sig") {
-			// Metadata JSON already exists
-			return nil
+	if len(jsonFiles) > 0 {
+		for _, jsonFile := range jsonFiles {
+			if !strings.HasSuffix(jsonFile, ".sig") {
+				// Metadata JSON already exists, skip generation
+				return nil
+			}
 		}
 	}
 
-	// Generate metadata JSON
-	pkgName := pkgInfo.Pkg
-	if pkgName == "" && len(pkgInfo.Provides) > 0 {
-		pkgName = pkgInfo.Provides[0]
-	}
-	if pkgName == "" {
-		pkgName = pkgInfo.PkgName
-	}
-	if pkgName == "" {
-		pkgName = pkgInfo.PkgFamily
+	// Determine upload targets to generate JSON for each
+	uploadTargets := u.determineUploadTargets(pkgInfo)
+
+	if len(uploadTargets) == 0 {
+		return fmt.Errorf("no upload targets found")
 	}
 
+	// Generate JSON for each target
+	for _, targetName := range uploadTargets {
+		if err := u.generateSingleMetadataJSON(pkgInfo, pkgDir, build, targetName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// generateSingleMetadataJSON generates metadata JSON for a single package variant
+func (u *Uploader) generateSingleMetadataJSON(pkgInfo *PackageInfo, pkgDir string, build *models.Build, targetName string) error {
+	// Determine repository and build type
+	repo := u.determineRepo(build.RecipePath)
+	buildType := u.extractBuildType(build.RecipePath)
+
+	// Sanitize names
+	pkgNameSanitized := u.sanitizePackageName(targetName)
+	pkgFamilySanitized := u.sanitizePackageName(pkgInfo.PkgFamily)
+	versionSanitized := u.sanitizeVersion(pkgInfo.Version)
+	archNormalized := strings.ToLower(build.Arch)
+
+	// Construct GHCR URLs
+	ghcrPkg := fmt.Sprintf("ghcr.io/pkgforge/%s/%s/%s/%s:%s-%s",
+		repo, pkgFamilySanitized, buildType, pkgNameSanitized, versionSanitized, archNormalized)
+
+	ghcrURL := fmt.Sprintf("ghcr.io/pkgforge/%s/%s/%s/%s",
+		repo, pkgFamilySanitized, buildType, pkgNameSanitized)
+
+	// API URLs
+	downloadURL := fmt.Sprintf("https://api.ghcr.pkgforge.dev/pkgforge/%s/%s/%s/%s?tag=%s-%s&download=%s",
+		repo, pkgFamilySanitized, buildType, pkgNameSanitized, versionSanitized, archNormalized, targetName)
+
+	manifestURL := fmt.Sprintf("https://api.ghcr.pkgforge.dev/pkgforge/%s/%s/%s/%s?tag=%s-%s&manifest",
+		repo, pkgFamilySanitized, buildType, pkgNameSanitized, versionSanitized, archNormalized)
+
+	metadataURL := fmt.Sprintf("https://api.ghcr.pkgforge.dev/pkgforge/%s/%s/%s/%s?tag=%s-%s&download=%s.json",
+		repo, pkgFamilySanitized, buildType, pkgNameSanitized, versionSanitized, archNormalized, targetName)
+
+	buildLogURL := fmt.Sprintf("https://api.ghcr.pkgforge.dev/pkgforge/%s/%s/%s/%s?tag=%s-%s&download=%s.log",
+		repo, pkgFamilySanitized, buildType, pkgNameSanitized, versionSanitized, archNormalized, targetName)
+
+	// GitHub Actions URL
+	buildGHA := ""
+	if build.ID > 0 {
+		buildGHA = fmt.Sprintf("https://github.com/pkgforge/%s/actions/runs/%d", repo, build.ID)
+	}
+
+	// Package webpage
+	pkgWebpage := fmt.Sprintf("https://pkgs.pkgforge.dev/repo/%s/%s/%s/%s/%s",
+		repo, archNormalized, pkgFamilySanitized, buildType, pkgNameSanitized)
+
+	// Build comprehensive metadata
 	metadata := map[string]interface{}{
-		"pkg":         pkgName,
-		"pkg_name":    pkgInfo.PkgName,
-		"pkg_family":  pkgInfo.PkgFamily,
-		"version":     pkgInfo.Version,
-		"description": pkgInfo.Description,
-		"homepage":    pkgInfo.Homepage,
-		"src_url":     pkgInfo.SrcURL,
-		"provides":    pkgInfo.Provides,
-		"build_date":  pkgInfo.BuildDate,
-		"build_id":    fmt.Sprintf("%d", build.ID),
-		"host":        build.Arch,
+		"pkg":          targetName,
+		"pkg_name":     targetName,
+		"pkg_family":   pkgInfo.PkgFamily,
+		"pkg_id":       build.PkgID,
+		"pkg_type":     buildType,
+		"pkg_webpage":  pkgWebpage,
+		"version":      pkgInfo.Version,
+		"description":  pkgInfo.Description,
+		"homepage":     pkgInfo.Homepage,
+		"src_url":      pkgInfo.SrcURL,
+		"provides":     pkgInfo.Provides,
+		"build_date":   pkgInfo.BuildDate,
+		"build_id":     fmt.Sprintf("%d", build.ID),
+		"build_gha":    buildGHA,
+		"build_log":    buildLogURL,
+		"build_script": build.RecipePath,
+		"host":         build.Arch,
+		"ghcr_pkg":     ghcrPkg,
+		"ghcr_url":     "https://" + ghcrURL,
+		"download_url": downloadURL,
+		"manifest_url": manifestURL,
+		"metadata_url": metadataURL,
 	}
 
 	// Add checksums if available
@@ -369,7 +431,7 @@ func (u *Uploader) generateMetadataJSON(pkgInfo *PackageInfo, pkgDir string, bui
 	}
 
 	// Write JSON to file
-	jsonPath := filepath.Join(pkgDir, fmt.Sprintf("%s.json", pkgName))
+	jsonPath := filepath.Join(pkgDir, fmt.Sprintf("%s.json", targetName))
 	jsonData, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
