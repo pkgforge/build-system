@@ -153,16 +153,26 @@ func (u *Uploader) determineUploadTargets(pkgInfo *PackageInfo) []string {
 		return pkgInfo.Provides
 	}
 
-	// Otherwise, use priority: pkg > provides[0] > pkg_name > pkg_family
+	// Otherwise, use priority: provides[0] > pkg_name > pkg_family > pkg
+	// Note: pkg might be the full name like "a-utils.static" which we want as fallback
 	var targetName string
-	if pkgInfo.Pkg != "" {
-		targetName = pkgInfo.Pkg
-	} else if len(pkgInfo.Provides) == 1 && pkgInfo.Provides[0] != "" {
+	if len(pkgInfo.Provides) == 1 && pkgInfo.Provides[0] != "" {
 		targetName = pkgInfo.Provides[0]
 	} else if pkgInfo.PkgName != "" {
 		targetName = pkgInfo.PkgName
 	} else if pkgInfo.PkgFamily != "" {
 		targetName = pkgInfo.PkgFamily
+	} else if pkgInfo.Pkg != "" {
+		// Last resort: use pkg field, but strip any file extension
+		targetName = pkgInfo.Pkg
+		// Remove common extensions like .static, .appimage, etc.
+		if idx := strings.LastIndex(targetName, "."); idx > 0 {
+			baseName := targetName[:idx]
+			// Only strip if it looks like an extension, not a domain
+			if !strings.Contains(baseName, ".") {
+				targetName = baseName
+			}
+		}
 	}
 
 	if targetName != "" {
