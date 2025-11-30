@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,11 +31,32 @@ func NewGenerator(config GeneratorConfig) *Generator {
 func (g *Generator) Generate() error {
 	fmt.Printf("Starting metadata generation for %s (%s)\n", g.config.Type, g.config.Arch)
 
-	// Step 1: Fetch GHCR package list
-	fmt.Println("Fetching GHCR package list...")
-	allPackages, err := FetchGHCRPackageList()
-	if err != nil {
-		return fmt.Errorf("failed to fetch GHCR packages: %w", err)
+	// Step 1: Generate fresh GHCR package list from GitHub API
+	var allPackages []string
+	fmt.Println("Generating GHCR package list from GitHub API...")
+	ghcrPkgsPath := filepath.Join(g.config.OutputDir, "GHCR_PKGS.json")
+	if err := GenerateGHCRPackageList(ghcrPkgsPath); err != nil {
+		fmt.Printf("  ⚠ Failed to generate GHCR package list, falling back to existing: %v\n", err)
+		// Fall back to downloading existing list
+		allPackages, err = FetchGHCRPackageList()
+		if err != nil {
+			return fmt.Errorf("failed to fetch GHCR packages: %w", err)
+		}
+	} else {
+		// Read the generated list
+		data, err := os.ReadFile(ghcrPkgsPath)
+		if err != nil {
+			return fmt.Errorf("failed to read GHCR_PKGS.json: %w", err)
+		}
+
+		var pkgs []GHCRPackageInfo
+		if err := json.Unmarshal(data, &pkgs); err != nil {
+			return fmt.Errorf("failed to parse GHCR_PKGS.json: %w", err)
+		}
+
+		for _, pkg := range pkgs {
+			allPackages = append(allPackages, pkg.Name)
+		}
 	}
 
 	// Step 2: Fetch SBUILD_LIST to get package families

@@ -21,19 +21,20 @@ type PackageMetadata struct {
 	BuildDate   string   `json:"build_date"`
 	BuildID     string   `json:"build_id"`
 	BuildScript string   `json:"build_script"`
-	Category    string   `json:"category"`
+	Category    []string `json:"category"`    // Array of categories
 	Checksum    string   `json:"checksum"`
 	DownloadURL string   `json:"download_url"`
 	GHCRPkg     string   `json:"ghcr_pkg"`
-	Homepage    string   `json:"homepage"`
+	Homepage    []string `json:"homepage"`    // Array of URLs
 	Icon        string   `json:"icon"`
-	License     string   `json:"license"`
-	Maintainer  string   `json:"maintainer"`
-	Note        string   `json:"note"`
+	License     []string `json:"license"`     // Array of licenses
+	Maintainer  []string `json:"maintainer"`  // Array of maintainers
+	Note        []string `json:"note"`        // Array of notes
 	ProvidesPkg []string `json:"provides_pkg"`
+	Provides    []string `json:"provides"`    // Alternative field name
 	Repology    string   `json:"repology"`
-	SrcURL      string   `json:"src_url"`
-	Tag         string   `json:"tag"`
+	SrcURL      []string `json:"src_url"`     // Array of URLs
+	Tag         []string `json:"tag"`         // Array of tags
 	WebURL      string   `json:"web_url"`
 }
 

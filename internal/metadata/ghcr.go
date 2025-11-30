@@ -13,6 +13,7 @@ import (
 
 // GHCRPackage represents a package from GHCR
 type GHCRPackage struct {
+	ID         int    `json:"id"`
 	Name       string `json:"name"`
 	Visibility string `json:"visibility"`
 	UpdatedAt  string `json:"updated_at"`
@@ -118,22 +119,123 @@ type GHCRPackageInfo struct {
 	Name string `json:"name"` // e.g., "bincache/a-utils/official/cal"
 }
 
-// FetchGHCRPackageList downloads and parses GHCR_PKGS.json.zstd
+// GenerateGHCRPackageList fetches all packages from GitHub API and generates GHCR_PKGS.json
+func GenerateGHCRPackageList(outputPath string) error {
+	const apiURL = "https://api.github.com/orgs/pkgforge/packages?package_type=container&per_page=100"
+
+	token := os.Getenv("GHCR_TOKEN")
+	if token == "" {
+		token = os.Getenv("GITHUB_TOKEN")
+	}
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	var allPackages []GHCRPackageInfo
+	page := 1
+
+	fmt.Println("Fetching packages from GitHub API...")
+
+	for {
+		url := fmt.Sprintf("%s&page=%d", apiURL, page)
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		req.Header.Set("Accept", "application/vnd.github+json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to fetch page %d: %w", page, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("API returned status %d for page %d", resp.StatusCode, page)
+		}
+
+		var packages []GHCRPackage
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+
+		if err := json.Unmarshal(body, &packages); err != nil {
+			return fmt.Errorf("failed to parse JSON: %w", err)
+		}
+
+		if len(packages) == 0 {
+			break
+		}
+
+		// Convert to GHCRPackageInfo format
+		for _, pkg := range packages {
+			allPackages = append(allPackages, GHCRPackageInfo{
+				ID:   pkg.ID,
+				Name: pkg.Name,
+			})
+		}
+
+		fmt.Printf("  Page %d: %d packages (total: %d)\n", page, len(packages), len(allPackages))
+		page++
+	}
+
+	// Write JSON
+	data, err := json.MarshalIndent(allPackages, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	if err := os.WriteFile(outputPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	// Compress with zstd
+	zstdPath := outputPath + ".zstd"
+	cmd := exec.Command("zstd", "--ultra", "-22", "--force", outputPath, "-o", zstdPath)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to compress: %w", err)
+	}
+
+	fmt.Printf("  ✓ Generated %s (%d packages)\n", zstdPath, len(allPackages))
+	return nil
+}
+
+// FetchGHCRPackageList downloads and parses GHCR_PKGS.json.zstd from releases
 func FetchGHCRPackageList() ([]string, error) {
-	const ghcrPkgsURL = "https://raw.githubusercontent.com/pkgforge/metadata/refs/heads/main/GHCR_PKGS.json.zstd"
+	// Try to fetch from build-system releases first
+	const releaseURL = "https://github.com/pkgforge/build-system/releases/latest/download/GHCR_PKGS.json.zstd"
+	const fallbackURL = "https://raw.githubusercontent.com/pkgforge/metadata/refs/heads/main/GHCR_PKGS.json.zstd"
 
 	client := &http.Client{Timeout: 120 * time.Second}
 
 	fmt.Println("Downloading GHCR package list...")
-	resp, err := client.Get(ghcrPkgsURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch GHCR_PKGS.json.zstd: %w", err)
+
+	// Try release URL first
+	resp, err := client.Get(releaseURL)
+	var urlUsed string
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		// Fallback to metadata repo
+		fmt.Println("  Release asset not found, using fallback...")
+		resp, err = client.Get(fallbackURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch GHCR_PKGS.json.zstd: %w", err)
+		}
+		urlUsed = fallbackURL
+	} else {
+		urlUsed = releaseURL
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to fetch GHCR_PKGS: status %d", resp.StatusCode)
 	}
+	fmt.Printf("  ✓ Fetched from %s\n", urlUsed)
 
 	// Save compressed file temporarily
 	tmpFile, err := os.CreateTemp("", "ghcr-pkgs-*.json.zstd")
