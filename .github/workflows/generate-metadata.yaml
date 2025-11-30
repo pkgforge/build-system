@@ -50,6 +50,15 @@ jobs:
           curl -qfsSL "https://github.com/pkgforge/soarql/releases/download/nightly/soarql-${ARCH}-linux" -o /tmp/soarql
           sudo install -m 755 /tmp/soarql /usr/local/bin/soarql
 
+          # Install oras
+          echo "- Installing oras..."
+          VERSION="1.2.0"
+          curl -LO "https://github.com/oras-project/oras/releases/download/v${VERSION}/oras_${VERSION}_linux_amd64.tar.gz"
+          mkdir -p /tmp/oras
+          tar -zxf oras_${VERSION}_linux_amd64.tar.gz -C /tmp/oras
+          sudo install -m 755 /tmp/oras/oras /usr/local/bin/oras
+          oras version
+
           # Verify minisign
           echo "- Verifying minisign..."
           minisign -v

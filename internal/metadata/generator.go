@@ -29,12 +29,7 @@ func NewGenerator(config GeneratorConfig) *Generator {
 func (g *Generator) Generate() error {
 	fmt.Printf("Starting metadata generation for %s (%s)\n", g.config.Type, g.config.Arch)
 
-	// Step 1: Verify soarql is available
-	if !fileExists(g.config.SoarqlPath) {
-		return fmt.Errorf("soarql not found at %s - please install it first", g.config.SoarqlPath)
-	}
-
-	// Step 2: Fetch package list from SBUILD_LIST.json (with release asset fallback)
+	// Step 1: Fetch package list from SBUILD_LIST.json (with release asset fallback)
 	var packages []string
 	var err error
 
@@ -64,16 +59,16 @@ func (g *Generator) Generate() error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Step 5: Generate JSON metadata using soarql
+	// Step 5: Generate JSON metadata using oras
 	jsonPath := filepath.Join(outputDir, fmt.Sprintf("%s.json", g.config.Arch))
-	soarqlConfig := SoarqlConfig{
-		SoarqlPath: g.config.SoarqlPath,
-		Arch:       g.config.Arch,
-		WorkDir:    "/tmp",
+	fetchConfig := FetchConfig{
+		OrasPath: "oras", // Use oras from PATH
+		Arch:     g.config.Arch,
+		WorkDir:  "/tmp",
 	}
 
 	fmt.Println("Generating metadata from GHCR packages...")
-	if err := GenerateMetadataForPackages(soarqlConfig, packages, jsonPath, g.config.Parallel); err != nil {
+	if err := GenerateMetadataForPackages(fetchConfig, packages, jsonPath, g.config.Parallel); err != nil {
 		return fmt.Errorf("failed to generate metadata: %w", err)
 	}
 
