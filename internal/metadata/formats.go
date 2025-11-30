@@ -127,18 +127,26 @@ func ConvertJSONToSQLite(jsonPath, dbPath string) error {
 	defer stmt.Close()
 
 	for _, pkg := range packages {
-		// Convert provides_pkg array to JSON string
-		providesPkg, _ := json.Marshal(pkg.ProvidesPkg)
+		// Convert array fields to JSON strings
+		provides, _ := json.Marshal(pkg.Provides)
+		category, _ := json.Marshal(pkg.Category)
+		homepage, _ := json.Marshal(pkg.Homepage)
+		license, _ := json.Marshal(pkg.License)
+		maintainer, _ := json.Marshal(pkg.Maintainer)
+		note, _ := json.Marshal(pkg.Note)
+		repology, _ := json.Marshal(pkg.Repology)
+		srcURL, _ := json.Marshal(pkg.SrcURL)
+		tag, _ := json.Marshal(pkg.Tag)
 
 		_, err := stmt.Exec(
-			pkg.Name, pkg.PkgID, pkg.Description, pkg.Version, pkg.Size,
+			pkg.Pkg, pkg.PkgID, pkg.Description, pkg.Version, pkg.Size,
 			pkg.Bsum, pkg.Shasum, pkg.BuildDate, pkg.BuildID, pkg.BuildScript,
-			pkg.Category, pkg.Checksum, pkg.DownloadURL, pkg.GHCRPkg,
-			pkg.Homepage, pkg.Icon, pkg.License, pkg.Maintainer, pkg.Note,
-			string(providesPkg), pkg.Repology, pkg.SrcURL, pkg.Tag, pkg.WebURL,
+			string(category), pkg.Shasum, pkg.DownloadURL, pkg.GHCRPkg,
+			string(homepage), pkg.Icon, string(license), string(maintainer), string(note),
+			string(provides), string(repology), string(srcURL), string(tag), pkg.PkgWebpage,
 		)
 		if err != nil {
-			fmt.Printf("Warning: failed to insert %s: %v\n", pkg.Name, err)
+			fmt.Printf("Warning: failed to insert %s: %v\n", pkg.Pkg, err)
 		}
 	}
 

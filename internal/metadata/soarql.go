@@ -11,31 +11,57 @@ import (
 
 // PackageMetadata represents metadata for a single package
 type PackageMetadata struct {
-	Name        string   `json:"pkg"`
-	PkgID       string   `json:"pkg_id"`
-	Description string   `json:"description"`
-	Version     string   `json:"version"`
-	Size        string   `json:"size"`
-	Bsum        string   `json:"bsum"`
-	Shasum      string   `json:"shasum"`
-	BuildDate   string   `json:"build_date"`
-	BuildID     string   `json:"build_id"`
-	BuildScript string   `json:"build_script"`
-	Category    []string `json:"category"`    // Array of categories
-	Checksum    string   `json:"checksum"`
-	DownloadURL string   `json:"download_url"`
-	GHCRPkg     string   `json:"ghcr_pkg"`
-	Homepage    []string `json:"homepage"`    // Array of URLs
-	Icon        string   `json:"icon"`
-	License     []string `json:"license"`     // Array of licenses
-	Maintainer  []string `json:"maintainer"`  // Array of maintainers
-	Note        []string `json:"note"`        // Array of notes
-	ProvidesPkg []string `json:"provides_pkg"`
-	Provides    []string `json:"provides"`    // Alternative field name
-	Repology    string   `json:"repology"`
-	SrcURL      []string `json:"src_url"`     // Array of URLs
-	Tag         []string `json:"tag"`         // Array of tags
-	WebURL      string   `json:"web_url"`
+	// Basic info
+	Disabled        string   `json:"_disabled"`
+	Host            string   `json:"host"`
+	Rank            string   `json:"rank"`
+	Pkg             string   `json:"pkg"`
+	PkgFamily       string   `json:"pkg_family"`
+	PkgID           string   `json:"pkg_id"`
+	PkgName         string   `json:"pkg_name"`
+	PkgType         string   `json:"pkg_type"`
+	PkgWebpage      string   `json:"pkg_webpage"`
+
+	// App info
+	AppID           string   `json:"app_id"`
+	Appstream       string   `json:"appstream"`
+	Desktop         string   `json:"desktop"`
+
+	// Descriptive
+	Category        []string `json:"category"`
+	Description     string   `json:"description"`
+	Homepage        []string `json:"homepage"`
+	Icon            string   `json:"icon"`
+	License         []string `json:"license"`
+	Maintainer      []string `json:"maintainer"`
+	Note            []string `json:"note"`
+	Provides        []string `json:"provides"`
+	Repology        []string `json:"repology"`
+	Screenshots     []string `json:"screenshots"`
+	SrcURL          []string `json:"src_url"`
+	Tag             []string `json:"tag"`
+
+	// Version
+	Version         string   `json:"version"`
+	VersionUpstream string   `json:"version_upstream"`
+
+	// Build info
+	Bsum            string   `json:"bsum"`
+	BuildDate       string   `json:"build_date"`
+	BuildGHA        string   `json:"build_gha"`
+	BuildID         string   `json:"build_id"`
+	BuildLog        string   `json:"build_log"`
+	BuildScript     string   `json:"build_script"`
+
+	// Download
+	DownloadURL     string   `json:"download_url"`
+	GHCRPkg         string   `json:"ghcr_pkg"`
+	GHCRURL         string   `json:"ghcr_url"`
+	ManifestURL     string   `json:"manifest_url"`
+	Shasum          string   `json:"shasum"`
+	Size            string   `json:"size"`
+	SizeRaw         string   `json:"size_raw"`
+	Snapshots       []string `json:"snapshots"`
 }
 
 // FetchConfig holds configuration for metadata fetching
@@ -153,7 +179,7 @@ func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata,
 	return &meta, nil
 }
 
-// constructBasicMetadata creates basic metadata when .METADATA file is not available
+// constructBasicMetadata creates basic metadata when annotation is not available
 func constructBasicMetadata(pkgName, arch string) *PackageMetadata {
 	// Extract package name from path
 	// Example: "bincache/40four/official" -> "40four"
@@ -169,8 +195,9 @@ func constructBasicMetadata(pkgName, arch string) *PackageMetadata {
 	}
 
 	return &PackageMetadata{
-		Name:    name,
+		Pkg:     name,
 		GHCRPkg: pkgName,
+		Host:    arch,
 	}
 }
 
