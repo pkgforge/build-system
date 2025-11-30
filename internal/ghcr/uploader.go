@@ -179,8 +179,8 @@ func (u *Uploader) signPackageFiles(files []string) error {
 			continue
 		}
 
-		// Skip existing .minisig files
-		if strings.HasSuffix(file, ".minisig") {
+		// Skip existing .sig files
+		if strings.HasSuffix(file, ".sig") {
 			continue
 		}
 
@@ -188,8 +188,9 @@ func (u *Uploader) signPackageFiles(files []string) error {
 		// -S = sign mode
 		// -s = secret key file
 		// -m = message file to sign
-		// -x = signature output file (optional)
-		cmd := exec.Command("minisign", "-S", "-s", tmpKey.Name(), "-m", file)
+		// -x = signature output file (use .sig extension)
+		sigFile := file + ".sig"
+		cmd := exec.Command("minisign", "-S", "-s", tmpKey.Name(), "-m", file, "-x", sigFile)
 
 		// If password is provided, pipe it to stdin
 		password := os.Getenv("MINISIGN_PASSWORD")

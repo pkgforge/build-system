@@ -155,8 +155,8 @@ jobs:
           echo "Signing all artifacts recursively"
           echo "=========================================="
 
-          # Find all files in artifacts directory (excluding .minisig files)
-          FILES=$(find artifacts -type f ! -name "*.minisig" | sort)
+          # Find all files in artifacts directory (excluding .sig files)
+          FILES=$(find artifacts -type f ! -name "*.sig" | sort)
 
           if [ -z "$FILES" ]; then
             echo "No files found to sign"
@@ -174,7 +174,7 @@ jobs:
           echo "=========================================="
           echo "Generated signatures"
           echo "=========================================="
-          find artifacts -type f -name "*.minisig" | sort
+          find artifacts -type f -name "*.sig" | sort
 
       - name: Upload metadata artifacts
         uses: actions/upload-artifact@v4
@@ -201,7 +201,7 @@ jobs:
           echo "$FILES"
 
           # Count signature files
-          SIG_COUNT=$(find artifacts -type f -name "*.minisig" | wc -l)
+          SIG_COUNT=$(find artifacts -type f -name "*.sig" | wc -l)
 
           # Create release with all metadata files
           gh release create "$TAG" \
@@ -216,18 +216,18 @@ jobs:
           - \`pkgcache/\` - Package cache metadata (JSON, SQLite, compressed)
           - \`bincache-SBUILD_LIST.json\` - Bincache package list
           - \`pkgcache-SBUILD_LIST.json\` - Pkgcache package list
-          - \`*.minisig\` - Minisign signatures for ALL files
+          - \`*.sig\` - Minisign signatures for ALL files
 
           ## Signature Verification
           \`\`\`bash
           # Download public key from repo
           curl -fsSL -o minisign.pub https://raw.githubusercontent.com/pkgforge/build-system/main/keys/minisign.pub
 
-          # Verify any file
-          minisign -V -p minisign.pub -m <filename>
+          # Verify any file (signature must have .sig extension)
+          minisign -V -p minisign.pub -m <filename> -x <filename>.sig
 
           # Example:
-          minisign -V -p minisign.pub -m bincache-SBUILD_LIST.json
+          minisign -V -p minisign.pub -m bincache-SBUILD_LIST.json -x bincache-SBUILD_LIST.json.sig
           \`\`\`
 
           Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" \
@@ -244,8 +244,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Count files and signatures
-          FILE_COUNT=$(find artifacts -type f ! -name "*.minisig" | wc -l)
-          SIG_COUNT=$(find artifacts -type f -name "*.minisig" | wc -l)
+          FILE_COUNT=$(find artifacts -type f ! -name "*.sig" | wc -l)
+          SIG_COUNT=$(find artifacts -type f -name "*.sig" | wc -l)
 
           echo "## 🔐 Cryptographic Signatures" >> $GITHUB_STEP_SUMMARY
           echo "- **Files generated**: $FILE_COUNT" >> $GITHUB_STEP_SUMMARY
@@ -261,12 +261,12 @@ jobs:
           if [ -f artifacts/bincache-SBUILD_LIST.json ]; then
             BINCACHE_COUNT=$(jq '. | length' artifacts/bincache-SBUILD_LIST.json 2>/dev/null || echo "?")
             echo "- ✅ bincache-SBUILD_LIST.json ($BINCACHE_COUNT packages)" >> $GITHUB_STEP_SUMMARY
-            [ -f artifacts/bincache-SBUILD_LIST.json.minisig ] && echo "  - 🔐 Signed" >> $GITHUB_STEP_SUMMARY
+            [ -f artifacts/bincache-SBUILD_LIST.json.sig ] && echo "  - 🔐 Signed" >> $GITHUB_STEP_SUMMARY
           fi
           if [ -f artifacts/pkgcache-SBUILD_LIST.json ]; then
             PKGCACHE_COUNT=$(jq '. | length' artifacts/pkgcache-SBUILD_LIST.json 2>/dev/null || echo "?")
             echo "- ✅ pkgcache-SBUILD_LIST.json ($PKGCACHE_COUNT packages)" >> $GITHUB_STEP_SUMMARY
-            [ -f artifacts/pkgcache-SBUILD_LIST.json.minisig ] && echo "  - 🔐 Signed" >> $GITHUB_STEP_SUMMARY
+            [ -f artifacts/pkgcache-SBUILD_LIST.json.sig ] && echo "  - 🔐 Signed" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
 

@@ -135,13 +135,13 @@ func FetchPackagesFromSBuildList(primaryURL, fallbackURL string) ([]string, erro
 	tmpFile.Close()
 
 	// Try to fetch and verify signature (only for release assets)
-	sigURL := primaryURL + ".minisig"
+	sigURL := primaryURL + ".sig"
 	sigResp, err := http.Get(sigURL)
 	if err == nil && sigResp.StatusCode == http.StatusOK {
 		sigBody, err := io.ReadAll(sigResp.Body)
 		sigResp.Body.Close()
 		if err == nil {
-			sigFile := tmpFile.Name() + ".minisig"
+			sigFile := tmpFile.Name() + ".sig"
 			if err := os.WriteFile(sigFile, sigBody, 0644); err == nil {
 				defer os.Remove(sigFile)
 
