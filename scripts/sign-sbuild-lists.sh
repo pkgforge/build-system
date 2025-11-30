@@ -50,9 +50,9 @@ sign_file() {
     # -x = signature output file (use .sig extension)
     local sig_file="${file}.sig"
 
-    # If password is provided, pipe it to stdin
+    # If password is provided, use printf to pipe it (works for each iteration)
     if [ -n "${MINISIGN_PASSWORD:-}" ]; then
-        echo "$MINISIGN_PASSWORD" | minisign -S -s "$tmp_key" -m "$file" -x "$sig_file"
+        printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$tmp_key" -m "$file" -x "$sig_file"
     else
         minisign -S -s "$tmp_key" -m "$file" -x "$sig_file"
     fi
