@@ -185,7 +185,18 @@ func (u *Uploader) signPackageFiles(files []string) error {
 		}
 
 		// Sign the file
+		// -S = sign mode
+		// -s = secret key file
+		// -m = message file to sign
+		// -x = signature output file (optional)
 		cmd := exec.Command("minisign", "-S", "-s", tmpKey.Name(), "-m", file)
+
+		// If password is provided, pipe it to stdin
+		password := os.Getenv("MINISIGN_PASSWORD")
+		if password != "" {
+			cmd.Stdin = strings.NewReader(password + "\n")
+		}
+
 		if output, err := cmd.CombinedOutput(); err != nil {
 			fmt.Printf("    ⚠ Failed to sign %s: %v\n", filepath.Base(file), err)
 			fmt.Printf("    Output: %s\n", string(output))

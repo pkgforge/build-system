@@ -291,6 +291,7 @@ jobs:
         id: build
         env:
           MINISIGN_KEY_CONTENT: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: |
           # Show what's in the queue
           echo "=== Build Queue Status ==="

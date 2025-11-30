@@ -47,7 +47,13 @@ sign_file() {
     # -S = sign
     # -s = secret key file
     # -m = message file
-    minisign -S -s "$tmp_key" -m "$file"
+
+    # If password is provided, pipe it to stdin
+    if [ -n "${MINISIGN_PASSWORD:-}" ]; then
+        echo "$MINISIGN_PASSWORD" | minisign -S -s "$tmp_key" -m "$file"
+    else
+        minisign -S -s "$tmp_key" -m "$file"
+    fi
 
     echo "  ✓ Created: ${file}.minisig"
 }
