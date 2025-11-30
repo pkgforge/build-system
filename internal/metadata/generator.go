@@ -17,12 +17,19 @@ type GeneratorConfig struct {
 
 // Generator handles metadata generation
 type Generator struct {
-	config GeneratorConfig
+	config       GeneratorConfig
+	ghcrPackages []GHCRPackage // Optional pre-fetched packages
 }
 
 // NewGenerator creates a new metadata generator
 func NewGenerator(config GeneratorConfig) *Generator {
 	return &Generator{config: config}
+}
+
+// WithGHCRPackages sets pre-fetched GHCR packages to avoid redundant API calls
+func (g *Generator) WithGHCRPackages(packages []GHCRPackage) *Generator {
+	g.ghcrPackages = packages
+	return g
 }
 
 // Generate runs the full metadata generation pipeline
@@ -34,13 +41,20 @@ func (g *Generator) Generate() error {
 		return fmt.Errorf("soarql not found at %s - please install it first", g.config.SoarqlPath)
 	}
 
-	// Step 2: Fetch GHCR packages
-	fmt.Println("Fetching GHCR package list...")
-	ghcrPackages, err := FetchGHCRPackages()
-	if err != nil {
-		return fmt.Errorf("failed to fetch GHCR packages: %w", err)
+	// Step 2: Get GHCR packages (fetch if not already provided)
+	var ghcrPackages []GHCRPackage
+	if len(g.ghcrPackages) > 0 {
+		fmt.Printf("Using pre-fetched GHCR package list (%d packages)\n", len(g.ghcrPackages))
+		ghcrPackages = g.ghcrPackages
+	} else {
+		fmt.Println("Fetching GHCR package list...")
+		var err error
+		ghcrPackages, err = FetchGHCRPackages()
+		if err != nil {
+			return fmt.Errorf("failed to fetch GHCR packages: %w", err)
+		}
+		fmt.Printf("Found %d total GHCR packages\n", len(ghcrPackages))
 	}
-	fmt.Printf("Found %d total GHCR packages\n", len(ghcrPackages))
 
 	// Step 3: Filter packages based on type
 	var packages []string
