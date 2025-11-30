@@ -65,6 +65,8 @@ func ensureGHCRLogin(orasPath string) error {
 	return nil
 }
 
+var pullErrorCount = 0
+
 // QueryPackageMetadata uses oras to fetch metadata for a package from GHCR
 func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata, error) {
 	// Construct GHCR image reference
@@ -90,8 +92,14 @@ func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata,
 	// Pull package from GHCR using oras
 	cmd := exec.Command(config.OrasPath, "pull", imageRef)
 	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
-		// Package might not exist or no access - return nil to skip
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Log the first few errors for debugging
+		pullErrorCount++
+		if pullErrorCount <= 3 {
+			fmt.Printf("    ⚠ Failed to pull %s: %v\n", imageRef, err)
+			fmt.Printf("       Output: %s\n", string(output))
+		}
 		return nil, nil
 	}
 
@@ -170,19 +178,25 @@ func GenerateMetadataForPackages(config FetchConfig, packages []string, outputPa
 	writer.WriteString("[\n")
 
 	count := 0
+	errorCount := 0
+	maxErrorsToShow := 5
 	for i, pkg := range packages {
 		if i%100 == 0 {
-			fmt.Printf("Progress: %d/%d packages...\n", i, len(packages))
+			fmt.Printf("Progress: %d/%d packages (successful: %d, errors: %d)...\n", i, len(packages), count, errorCount)
 		}
 
 		meta, err := QueryPackageMetadata(config, pkg)
 		if err != nil {
-			fmt.Printf("Warning: failed to query %s: %v\n", pkg, err)
+			errorCount++
+			if errorCount <= maxErrorsToShow {
+				fmt.Printf("Warning: failed to query %s: %v\n", pkg, err)
+			}
 			continue
 		}
 
 		if meta == nil {
 			// Package has no metadata, skip
+			errorCount++
 			continue
 		}
 
