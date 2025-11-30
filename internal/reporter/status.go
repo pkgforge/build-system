@@ -178,8 +178,6 @@ func (r *Reporter) ExportMarkdown() (string, error) {
 	return sb.String(), nil
 }
 
-// Helper functions
-
 func statusIcon(status string) string {
 	switch status {
 	case string(models.StatusSucceeded):

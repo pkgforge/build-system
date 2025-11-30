@@ -15,21 +15,18 @@ func GenerateCompressedFormats(jsonPath, arch string) error {
 	baseDir := filepath.Dir(jsonPath)
 	baseName := fmt.Sprintf("%s.json", arch)
 
-	// Generate .xz
 	xzPath := filepath.Join(baseDir, fmt.Sprintf("%s.xz", arch))
 	fmt.Printf("Generating %s...\n", xzPath)
 	if err := runCommand("xz", "-9", "-f", "-k", filepath.Join(baseDir, baseName)); err != nil {
 		return fmt.Errorf("failed to create xz: %w", err)
 	}
 
-	// Generate .zstd
 	zstdPath := filepath.Join(baseDir, fmt.Sprintf("%s.zstd", arch))
 	fmt.Printf("Generating %s...\n", zstdPath)
 	if err := runCommand("zstd", "-19", "-f", filepath.Join(baseDir, baseName), "-o", zstdPath); err != nil {
 		return fmt.Errorf("failed to create zstd: %w", err)
 	}
 
-	// Generate b3sum checksums
 	fmt.Println("Generating checksums...")
 	files := []string{
 		filepath.Join(baseDir, baseName),
@@ -41,7 +38,6 @@ func GenerateCompressedFormats(jsonPath, arch string) error {
 		bsumPath := file + ".bsum"
 		output, err := runCommandWithOutput("b3sum", file)
 		if err != nil {
-			// b3sum might not be available, skip
 			fmt.Printf("Warning: b3sum not available for %s\n", file)
 			continue
 		}
@@ -58,7 +54,6 @@ func GenerateCompressedFormats(jsonPath, arch string) error {
 func ConvertJSONToSQLite(jsonPath, dbPath string) error {
 	fmt.Printf("Converting %s to SQLite database...\n", jsonPath)
 
-	// Read JSON
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return fmt.Errorf("failed to read JSON: %w", err)
@@ -69,14 +64,12 @@ func ConvertJSONToSQLite(jsonPath, dbPath string) error {
 		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
-	// Create SQLite database
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
 
-	// Create table
 	schema := `
 	CREATE TABLE IF NOT EXISTS packages (
 		pkg TEXT PRIMARY KEY,
@@ -112,7 +105,6 @@ func ConvertJSONToSQLite(jsonPath, dbPath string) error {
 		return fmt.Errorf("failed to create schema: %w", err)
 	}
 
-	// Insert packages
 	stmt, err := db.Prepare(`
 		INSERT OR REPLACE INTO packages (
 			pkg, pkg_id, description, version, size, bsum, shasum,
@@ -127,7 +119,6 @@ func ConvertJSONToSQLite(jsonPath, dbPath string) error {
 	defer stmt.Close()
 
 	for _, pkg := range packages {
-		// Convert array fields to JSON strings
 		provides, _ := json.Marshal(pkg.Provides)
 		category, _ := json.Marshal(pkg.Category)
 		homepage, _ := json.Marshal(pkg.Homepage)
@@ -152,7 +143,6 @@ func ConvertJSONToSQLite(jsonPath, dbPath string) error {
 
 	fmt.Printf("Inserted %d packages into database\n", len(packages))
 
-	// Optimize database
 	if _, err := db.Exec("VACUUM"); err != nil {
 		fmt.Printf("Warning: failed to vacuum database: %v\n", err)
 	}
@@ -164,24 +154,20 @@ func ConvertJSONToSQLite(jsonPath, dbPath string) error {
 func GenerateAllFormats(jsonPath, arch string) error {
 	baseDir := filepath.Dir(jsonPath)
 
-	// Generate SQLite database
 	dbPath := filepath.Join(baseDir, fmt.Sprintf("%s.db", arch))
 	if err := ConvertJSONToSQLite(jsonPath, dbPath); err != nil {
 		return err
 	}
 
-	// Generate compressed formats for JSON
 	if err := GenerateCompressedFormats(jsonPath, arch); err != nil {
 		return err
 	}
 
-	// Generate compressed formats for DB
 	dbBaseName := fmt.Sprintf("%s.db", arch)
 	dbFiles := []string{
 		filepath.Join(baseDir, dbBaseName),
 	}
 
-	// Compress DB
 	fmt.Println("Compressing database...")
 	if err := runCommand("xz", "-9", "-f", "-k", filepath.Join(baseDir, dbBaseName)); err != nil {
 		fmt.Printf("Warning: failed to create db.xz: %v\n", err)
@@ -191,7 +177,6 @@ func GenerateAllFormats(jsonPath, arch string) error {
 		fmt.Printf("Warning: failed to create db.zstd: %v\n", err)
 	}
 
-	// Generate checksums for DB files
 	dbFiles = append(dbFiles,
 		filepath.Join(baseDir, fmt.Sprintf("%s.db.xz", arch)),
 		filepath.Join(baseDir, fmt.Sprintf("%s.db.zstd", arch)),

@@ -35,10 +35,8 @@ func main() {
 		Long:  "A clean, efficient build orchestration system for pkgforge/soarpkgs",
 	}
 
-	// Global flags
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "buildqueue.db", "Path to SQLite database")
 
-	// Commands
 	rootCmd.AddCommand(syncCmd())
 	rootCmd.AddCommand(queueCmd())
 	rootCmd.AddCommand(forceCmd())

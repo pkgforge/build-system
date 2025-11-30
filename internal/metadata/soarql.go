@@ -71,16 +71,13 @@ type FetchConfig struct {
 	WorkDir  string
 }
 
-// ensureGHCRLogin ensures oras is logged in to GHCR (call once before fetching)
+// ensureGHCRLogin ensures oras is logged in to GHCR
 func ensureGHCRLogin(orasPath string) error {
-	// Check if GHCR_TOKEN is set
 	token := os.Getenv("GHCR_TOKEN")
 	if token == "" {
-		// No token, try without authentication
 		return nil
 	}
 
-	// Login to GHCR using token
 	cmd := exec.Command(orasPath, "login", "ghcr.io", "-u", "token", "--password-stdin")
 	cmd.Stdin = strings.NewReader(token)
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -95,7 +92,6 @@ var pullErrorCount = 0
 
 // QueryPackageMetadata fetches metadata from GHCR package manifest annotations
 func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata, error) {
-	// Construct GHCR package reference (without tag)
 	var pkgRef string
 	if strings.HasPrefix(ghcrPkg, "ghcr.io/") {
 		pkgRef = ghcrPkg
@@ -103,7 +99,6 @@ func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata,
 		pkgRef = fmt.Sprintf("ghcr.io/pkgforge/%s", ghcrPkg)
 	}
 
-	// Step 1: Get latest tag for this architecture
 	cmd := exec.Command(config.OrasPath, "repo", "tags", pkgRef)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -114,14 +109,11 @@ func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata,
 		return nil, nil
 	}
 
-	// Find the latest tag matching the architecture
-	// Format: HEAD-hash-dateThms-x86_64-Linux or version-x86_64-Linux
 	var latestTag string
-	archPattern := strings.ToLower(config.Arch) // x86_64-Linux -> x86_64-linux
+	archPattern := strings.ToLower(config.Arch)
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		tag := strings.TrimSpace(scanner.Text())
-		// Skip srcbuild tags and match architecture
 		if !strings.Contains(tag, "srcbuild") && strings.Contains(strings.ToLower(tag), archPattern) {
 			latestTag = tag
 		}
@@ -135,7 +127,6 @@ func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata,
 		return nil, nil
 	}
 
-	// Step 2: Fetch manifest for the tag
 	imageRef := fmt.Sprintf("%s:%s", pkgRef, latestTag)
 	cmd = exec.Command(config.OrasPath, "manifest", "fetch", imageRef)
 	output, err = cmd.CombinedOutput()
@@ -147,7 +138,6 @@ func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata,
 		return nil, nil
 	}
 
-	// Step 3: Parse manifest JSON and extract metadata from annotations
 	var manifest struct {
 		Annotations map[string]string `json:"annotations"`
 	}
@@ -159,14 +149,11 @@ func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata,
 		return nil, nil
 	}
 
-	// Extract metadata from annotation
 	metaJSON, ok := manifest.Annotations["dev.pkgforge.soar.json"]
 	if !ok {
-		// No metadata annotation, skip
 		return nil, nil
 	}
 
-	// Parse metadata JSON
 	var meta PackageMetadata
 	if err := json.Unmarshal([]byte(metaJSON), &meta); err != nil {
 		pullErrorCount++
@@ -181,13 +168,11 @@ func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata,
 
 // constructBasicMetadata creates basic metadata when annotation is not available
 func constructBasicMetadata(pkgName, arch string) *PackageMetadata {
-	// Extract package name from path
-	// Example: "bincache/40four/official" -> "40four"
 	parts := strings.Split(strings.TrimPrefix(pkgName, "ghcr.io/pkgforge/"), "/")
 
 	var name string
 	if len(parts) >= 2 {
-		name = parts[len(parts)-2] // Get package name (second to last part)
+		name = parts[len(parts)-2]
 	} else if len(parts) > 0 {
 		name = parts[0]
 	} else {
@@ -205,12 +190,10 @@ func constructBasicMetadata(pkgName, arch string) *PackageMetadata {
 func GenerateMetadataForPackages(config FetchConfig, packages []string, outputPath string, parallel int) error {
 	fmt.Printf("Processing %d packages with %d parallel workers...\n", len(packages), parallel)
 
-	// Login to GHCR once before processing
 	if err := ensureGHCRLogin(config.OrasPath); err != nil {
 		return fmt.Errorf("failed to authenticate with GHCR: %w", err)
 	}
 
-	// Create output file
 	outFile, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
@@ -220,7 +203,6 @@ func GenerateMetadataForPackages(config FetchConfig, packages []string, outputPa
 	writer := bufio.NewWriter(outFile)
 	defer writer.Flush()
 
-	// Write JSON array start
 	writer.WriteString("[\n")
 
 	count := 0
@@ -241,12 +223,10 @@ func GenerateMetadataForPackages(config FetchConfig, packages []string, outputPa
 		}
 
 		if meta == nil {
-			// Package has no metadata, skip
 			errorCount++
 			continue
 		}
 
-		// Write JSON object
 		if count > 0 {
 			writer.WriteString(",\n")
 		}
@@ -261,7 +241,6 @@ func GenerateMetadataForPackages(config FetchConfig, packages []string, outputPa
 		count++
 	}
 
-	// Write JSON array end
 	writer.WriteString("\n]\n")
 
 	fmt.Printf("Successfully generated metadata for %d packages\n", count)

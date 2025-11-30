@@ -31,15 +31,12 @@ type SBuildEntry struct {
 }
 
 const (
-	// Release asset URLs (preferred)
 	BincacheReleaseURL = "https://github.com/pkgforge/build-system/releases/latest/download/bincache-SBUILD_LIST.json"
 	PkgcacheReleaseURL = "https://github.com/pkgforge/build-system/releases/latest/download/pkgcache-SBUILD_LIST.json"
 
-	// Fallback URLs (legacy repos)
 	BincacheFallbackURL = "https://raw.githubusercontent.com/pkgforge/bincache/refs/heads/main/SBUILD_LIST.json"
 	PkgcacheFallbackURL = "https://raw.githubusercontent.com/pkgforge/pkgcache/refs/heads/main/SBUILD_LIST.json"
 
-	// Minisign public key path
 	MinisignPubKeyPath = "keys/minisign.pub"
 )
 
@@ -47,7 +44,6 @@ const (
 func fetchWithFallback(primaryURL, fallbackURL string) ([]byte, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	// Try primary URL (release asset)
 	resp, err := client.Get(primaryURL)
 	if err == nil && resp.StatusCode == http.StatusOK {
 		defer resp.Body.Close()
@@ -61,7 +57,6 @@ func fetchWithFallback(primaryURL, fallbackURL string) ([]byte, error) {
 		resp.Body.Close()
 	}
 
-	// Fallback to legacy repo URL
 	fmt.Printf("  Release asset not found, using fallback URL...\n")
 	resp, err = client.Get(fallbackURL)
 	if err != nil {
@@ -84,25 +79,21 @@ func fetchWithFallback(primaryURL, fallbackURL string) ([]byte, error) {
 
 // verifyMinisign verifies a file's minisign signature
 func verifyMinisign(dataPath, sigPath, pubKeyPath string) error {
-	// Check if minisign is available
 	if _, err := exec.LookPath("minisign"); err != nil {
 		fmt.Printf("  ⚠ minisign not found, skipping signature verification\n")
-		return nil // Don't fail if minisign is not available
+		return nil
 	}
 
-	// Check if public key exists
 	if _, err := os.Stat(pubKeyPath); os.IsNotExist(err) {
 		fmt.Printf("  ⚠ Public key not found at %s, skipping verification\n", pubKeyPath)
-		return nil // Don't fail if key doesn't exist yet
+		return nil
 	}
 
-	// Check if signature file exists
 	if _, err := os.Stat(sigPath); os.IsNotExist(err) {
 		fmt.Printf("  ⚠ Signature file not found, skipping verification\n")
-		return nil // Don't fail if signature doesn't exist (fallback URLs won't have sigs)
+		return nil
 	}
 
-	// Verify signature
 	cmd := exec.Command("minisign", "-V", "-p", pubKeyPath, "-m", dataPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -372,14 +363,10 @@ func FetchPackagesFromSBuildList(primaryURL, fallbackURL string) ([]string, erro
 
 	var packages []string
 	for _, entry := range entries {
-		// Skip disabled packages
 		if entry.Disabled {
 			continue
 		}
 
-		// Extract package name from ghcr_pkg
-		// Format: "ghcr.io/pkgforge/bincache/40four/official"
-		// We want: "bincache/40four/official"
 		pkgName := strings.TrimPrefix(entry.GHCRPkg, "ghcr.io/pkgforge/")
 		if pkgName != "" {
 			packages = append(packages, pkgName)
