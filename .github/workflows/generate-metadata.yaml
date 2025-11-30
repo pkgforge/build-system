@@ -36,7 +36,7 @@ jobs:
         run: |
           echo "Installing system dependencies..."
           sudo apt-get update
-          sudo apt-get install -y curl wget jq xz-utils zstd sqlite3
+          sudo apt-get install -y curl wget jq xz-utils zstd sqlite3 minisign
 
           # Install b3sum
           echo "- Installing b3sum..."
@@ -49,6 +49,10 @@ jobs:
           ARCH=$(uname -m)
           curl -qfsSL "https://github.com/pkgforge/soarql/releases/download/nightly/soarql-${ARCH}-linux" -o /tmp/soarql
           sudo install -m 755 /tmp/soarql /usr/local/bin/soarql
+
+          # Verify minisign
+          echo "- Verifying minisign..."
+          minisign -v
 
       - name: Generate metadata
         env:
@@ -121,6 +125,56 @@ jobs:
           echo "=========================================="
           find artifacts -type f | sort
 
+      - name: Fetch SBUILD_LIST.json files
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "Fetching SBUILD_LIST.json files"
+          echo "=========================================="
+
+          # Fetch from source repos
+          echo "Fetching bincache SBUILD_LIST.json..."
+          curl -fsSL -o artifacts/bincache-SBUILD_LIST.json \
+            "https://raw.githubusercontent.com/pkgforge/bincache/refs/heads/main/SBUILD_LIST.json"
+
+          echo "Fetching pkgcache SBUILD_LIST.json..."
+          curl -fsSL -o artifacts/pkgcache-SBUILD_LIST.json \
+            "https://raw.githubusercontent.com/pkgforge/pkgcache/refs/heads/main/SBUILD_LIST.json"
+
+          echo ""
+          echo "Fetched SBUILD_LIST.json files:"
+          ls -lh artifacts/*-SBUILD_LIST.json
+
+      - name: Sign all artifacts with minisign
+        env:
+          MINISIGN_KEY_CONTENT: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "Signing all artifacts recursively"
+          echo "=========================================="
+
+          # Find all files in artifacts directory (excluding .minisig files)
+          FILES=$(find artifacts -type f ! -name "*.minisig" | sort)
+
+          if [ -z "$FILES" ]; then
+            echo "No files found to sign"
+            exit 1
+          fi
+
+          echo "Files to sign:"
+          echo "$FILES"
+          echo ""
+
+          # Sign all files
+          ./scripts/sign-sbuild-lists.sh $FILES
+
+          echo ""
+          echo "=========================================="
+          echo "Generated signatures"
+          echo "=========================================="
+          find artifacts -type f -name "*.minisig" | sort
+
       - name: Upload metadata artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -145,15 +199,35 @@ jobs:
           echo "Files to upload:"
           echo "$FILES"
 
+          # Count signature files
+          SIG_COUNT=$(find artifacts -type f -name "*.minisig" | wc -l)
+
           # Create release with all metadata files
           gh release create "$TAG" \
             --title "Metadata Release - $(date -u +"%Y-%m-%d %H:00 UTC")" \
             --notes "Automated metadata release from build-system.
 
+          ## 🔐 All files are cryptographically signed with minisign ($SIG_COUNT signatures)
+
           ## Contents
-          - \`INDEX.json\` - Full package metadata (JSON)
+          - \`INDEX.json\` - Full package metadata
           - \`bincache/\` - Binary cache metadata (JSON, SQLite, compressed)
           - \`pkgcache/\` - Package cache metadata (JSON, SQLite, compressed)
+          - \`bincache-SBUILD_LIST.json\` - Bincache package list
+          - \`pkgcache-SBUILD_LIST.json\` - Pkgcache package list
+          - \`*.minisig\` - Minisign signatures for ALL files
+
+          ## Signature Verification
+          \`\`\`bash
+          # Download public key from repo
+          curl -fsSL -o minisign.pub https://raw.githubusercontent.com/pkgforge/build-system/main/keys/minisign.pub
+
+          # Verify any file
+          minisign -V -p minisign.pub -m <filename>
+
+          # Example:
+          minisign -V -p minisign.pub -m bincache-SBUILD_LIST.json
+          \`\`\`
 
           Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" \
             $FILES
@@ -167,7 +241,35 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Architecture:** ${{ inputs.arch }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Generated Files" >> $GITHUB_STEP_SUMMARY
+
+          # Count files and signatures
+          FILE_COUNT=$(find artifacts -type f ! -name "*.minisig" | wc -l)
+          SIG_COUNT=$(find artifacts -type f -name "*.minisig" | wc -l)
+
+          echo "## 🔐 Cryptographic Signatures" >> $GITHUB_STEP_SUMMARY
+          echo "- **Files generated**: $FILE_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Signatures created**: $SIG_COUNT" >> $GITHUB_STEP_SUMMARY
+          if [ "$FILE_COUNT" -eq "$SIG_COUNT" ]; then
+            echo "- ✅ **All files signed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⚠️ **Warning**: Not all files have signatures" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## SBUILD_LIST Files" >> $GITHUB_STEP_SUMMARY
+          if [ -f artifacts/bincache-SBUILD_LIST.json ]; then
+            BINCACHE_COUNT=$(jq '. | length' artifacts/bincache-SBUILD_LIST.json 2>/dev/null || echo "?")
+            echo "- ✅ bincache-SBUILD_LIST.json ($BINCACHE_COUNT packages)" >> $GITHUB_STEP_SUMMARY
+            [ -f artifacts/bincache-SBUILD_LIST.json.minisig ] && echo "  - 🔐 Signed" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f artifacts/pkgcache-SBUILD_LIST.json ]; then
+            PKGCACHE_COUNT=$(jq '. | length' artifacts/pkgcache-SBUILD_LIST.json 2>/dev/null || echo "?")
+            echo "- ✅ pkgcache-SBUILD_LIST.json ($PKGCACHE_COUNT packages)" >> $GITHUB_STEP_SUMMARY
+            [ -f artifacts/pkgcache-SBUILD_LIST.json.minisig ] && echo "  - 🔐 Signed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## All Generated Files" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           find artifacts -type f | sort >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

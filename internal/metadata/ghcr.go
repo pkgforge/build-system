@@ -1,12 +1,12 @@
 package metadata
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -19,228 +19,164 @@ type GHCRPackage struct {
 	URL        string `json:"url"`
 }
 
-// GraphQL types for package query
-type graphQLRequest struct {
-	Query     string                 `json:"query"`
-	Variables map[string]interface{} `json:"variables"`
+// SBuildEntry represents an entry in SBUILD_LIST.json
+type SBuildEntry struct {
+	Disabled    bool   `json:"_disabled"`
+	Rebuild     bool   `json:"rebuild"`
+	PkgFamily   string `json:"pkg_family"`
+	Description string `json:"description"`
+	GHCRPkg     string `json:"ghcr_pkg"`
+	BuildScript string `json:"build_script"`
 }
 
-type graphQLResponse struct {
-	Data struct {
-		Organization struct {
-			Packages struct {
-				PageInfo struct {
-					HasNextPage bool   `json:"hasNextPage"`
-					EndCursor   string `json:"endCursor"`
-				} `json:"pageInfo"`
-				Nodes []struct {
-					Name       string `json:"name"`
-					Visibility string `json:"visibility"`
-					UpdatedAt  string `json:"updatedAt"`
-				} `json:"nodes"`
-			} `json:"packages"`
-		} `json:"organization"`
-	} `json:"data"`
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors"`
-}
+const (
+	// Release asset URLs (preferred)
+	BincacheReleaseURL = "https://github.com/pkgforge/build-system/releases/latest/download/bincache-SBUILD_LIST.json"
+	PkgcacheReleaseURL = "https://github.com/pkgforge/build-system/releases/latest/download/pkgcache-SBUILD_LIST.json"
 
-// FetchGHCRPackages fetches all public packages from GitHub Container Registry
-// using GraphQL API to bypass the 10k REST API limit
-func FetchGHCRPackages() ([]GHCRPackage, error) {
-	fmt.Println("Querying GitHub GraphQL API for pkgforge GHCR packages...")
+	// Fallback URLs (legacy repos)
+	BincacheFallbackURL = "https://raw.githubusercontent.com/pkgforge/bincache/refs/heads/main/SBUILD_LIST.json"
+	PkgcacheFallbackURL = "https://raw.githubusercontent.com/pkgforge/pkgcache/refs/heads/main/SBUILD_LIST.json"
 
-	token := getGitHubToken()
-	if token == "" {
-		return nil, fmt.Errorf("GITHUB_TOKEN environment variable is required to query org packages")
+	// Minisign public key path
+	MinisignPubKeyPath = "keys/minisign.pub"
+)
+
+// fetchWithFallback tries primary URL first, falls back to secondary URL
+func fetchWithFallback(primaryURL, fallbackURL string) ([]byte, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// Try primary URL (release asset)
+	resp, err := client.Get(primaryURL)
+	if err == nil && resp.StatusCode == http.StatusOK {
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err == nil {
+			fmt.Printf("  ✓ Fetched from release asset\n")
+			return body, nil
+		}
+	}
+	if resp != nil {
+		resp.Body.Close()
 	}
 
-	const graphqlQuery = `
-		query($cursor: String, $perPage: Int!) {
-			organization(login: "pkgforge") {
-				packages(first: $perPage, after: $cursor, packageType: CONTAINER) {
-					pageInfo {
-						hasNextPage
-						endCursor
-					}
-					nodes {
-						name
-						visibility
-						updatedAt
-					}
+	// Fallback to legacy repo URL
+	fmt.Printf("  Release asset not found, using fallback URL...\n")
+	resp, err = client.Get(fallbackURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from both URLs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch SBUILD_LIST: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read SBUILD_LIST: %w", err)
+	}
+
+	fmt.Printf("  ✓ Fetched from fallback URL\n")
+	return body, nil
+}
+
+// verifyMinisign verifies a file's minisign signature
+func verifyMinisign(dataPath, sigPath, pubKeyPath string) error {
+	// Check if minisign is available
+	if _, err := exec.LookPath("minisign"); err != nil {
+		fmt.Printf("  ⚠ minisign not found, skipping signature verification\n")
+		return nil // Don't fail if minisign is not available
+	}
+
+	// Check if public key exists
+	if _, err := os.Stat(pubKeyPath); os.IsNotExist(err) {
+		fmt.Printf("  ⚠ Public key not found at %s, skipping verification\n", pubKeyPath)
+		return nil // Don't fail if key doesn't exist yet
+	}
+
+	// Check if signature file exists
+	if _, err := os.Stat(sigPath); os.IsNotExist(err) {
+		fmt.Printf("  ⚠ Signature file not found, skipping verification\n")
+		return nil // Don't fail if signature doesn't exist (fallback URLs won't have sigs)
+	}
+
+	// Verify signature
+	cmd := exec.Command("minisign", "-V", "-p", pubKeyPath, "-m", dataPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("signature verification failed: %w\nOutput: %s", err, string(output))
+	}
+
+	fmt.Printf("  ✓ Signature verified\n")
+	return nil
+}
+
+// FetchPackagesFromSBuildList fetches package names from SBUILD_LIST.json
+// with release asset fallback and optional minisign verification
+func FetchPackagesFromSBuildList(primaryURL, fallbackURL string) ([]string, error) {
+	// Fetch data with fallback
+	body, err := fetchWithFallback(primaryURL, fallbackURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch SBUILD_LIST: %w", err)
+	}
+
+	// Save to temp file for minisign verification
+	tmpFile, err := os.CreateTemp("", "sbuild-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	if _, err := tmpFile.Write(body); err != nil {
+		return nil, fmt.Errorf("failed to write temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Try to fetch and verify signature (only for release assets)
+	sigURL := primaryURL + ".minisig"
+	sigResp, err := http.Get(sigURL)
+	if err == nil && sigResp.StatusCode == http.StatusOK {
+		sigBody, err := io.ReadAll(sigResp.Body)
+		sigResp.Body.Close()
+		if err == nil {
+			sigFile := tmpFile.Name() + ".minisig"
+			if err := os.WriteFile(sigFile, sigBody, 0644); err == nil {
+				defer os.Remove(sigFile)
+
+				// Verify signature
+				if err := verifyMinisign(tmpFile.Name(), sigFile, MinisignPubKeyPath); err != nil {
+					return nil, fmt.Errorf("signature verification failed: %w", err)
 				}
 			}
 		}
-	`
-
-	var allPackages []GHCRPackage
-	cursor := ""
-	perPage := 100
-	maxRetries := 3
-	pageCount := 0
-
-	for {
-		pageCount++
-		var lastErr error
-		var gqlResp graphQLResponse
-
-		// Retry logic for transient errors
-		for attempt := 1; attempt <= maxRetries; attempt++ {
-			reqBody := graphQLRequest{
-				Query: graphqlQuery,
-				Variables: map[string]interface{}{
-					"perPage": perPage,
-				},
-			}
-
-			if cursor != "" {
-				reqBody.Variables["cursor"] = cursor
-			}
-
-			jsonBody, err := json.Marshal(reqBody)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal GraphQL request: %w", err)
-			}
-
-			req, err := http.NewRequest("POST", "https://api.github.com/graphql", bytes.NewBuffer(jsonBody))
-			if err != nil {
-				return nil, fmt.Errorf("failed to create request: %w", err)
-			}
-
-			req.Header.Set("Authorization", "bearer "+token)
-			req.Header.Set("Content-Type", "application/json")
-
-			client := &http.Client{Timeout: 30 * time.Second}
-			resp, err := client.Do(req)
-			if err != nil {
-				lastErr = fmt.Errorf("failed to fetch GHCR packages (attempt %d/%d): %w", attempt, maxRetries, err)
-				if attempt < maxRetries {
-					time.Sleep(time.Duration(attempt) * time.Second)
-					continue
-				}
-				return nil, lastErr
-			}
-
-			// Read and close body immediately to avoid resource leaks
-			body, err := io.ReadAll(resp.Body)
-			resp.Body.Close()
-
-			if err != nil {
-				lastErr = fmt.Errorf("failed to read response body (attempt %d/%d): %w", attempt, maxRetries, err)
-				if attempt < maxRetries {
-					time.Sleep(time.Duration(attempt) * time.Second)
-					continue
-				}
-				return nil, lastErr
-			}
-
-			// Handle non-200 status codes with retry for server errors
-			if resp.StatusCode != http.StatusOK {
-				lastErr = fmt.Errorf("failed to fetch GHCR packages: status %d, body: %s", resp.StatusCode, string(body))
-				// Retry on 5xx errors (server-side issues)
-				if resp.StatusCode >= 500 && resp.StatusCode < 600 && attempt < maxRetries {
-					fmt.Printf("  Server error (status %d), retrying in %d seconds... (attempt %d/%d)\n",
-						resp.StatusCode, attempt, attempt, maxRetries)
-					time.Sleep(time.Duration(attempt*2) * time.Second)
-					continue
-				}
-				return nil, lastErr
-			}
-
-			// Parse GraphQL response
-			if err := json.Unmarshal(body, &gqlResp); err != nil {
-				return nil, fmt.Errorf("failed to parse GraphQL response: %w", err)
-			}
-
-			// Check for GraphQL errors
-			if len(gqlResp.Errors) > 0 {
-				return nil, fmt.Errorf("GraphQL errors: %v", gqlResp.Errors)
-			}
-
-			// Success - break out of retry loop
-			break
-		}
-
-		// Convert GraphQL nodes to GHCRPackage
-		for _, node := range gqlResp.Data.Organization.Packages.Nodes {
-			allPackages = append(allPackages, GHCRPackage{
-				Name:       node.Name,
-				Visibility: node.Visibility,
-				UpdatedAt:  node.UpdatedAt,
-			})
-		}
-
-		fmt.Printf("  Fetched page %d (%d packages so far)\n", pageCount, len(allPackages))
-
-		// Check if there are more pages
-		if !gqlResp.Data.Organization.Packages.PageInfo.HasNextPage {
-			break
-		}
-
-		cursor = gqlResp.Data.Organization.Packages.PageInfo.EndCursor
-
-		// Add a small delay between requests to avoid rate limiting
-		time.Sleep(100 * time.Millisecond)
+	} else if sigResp != nil {
+		sigResp.Body.Close()
 	}
 
-	fmt.Printf("Completed: Fetched %d total packages across %d pages\n", len(allPackages), pageCount)
-	return allPackages, nil
-}
-
-// getGitHubToken retrieves GitHub token from environment
-func getGitHubToken() string {
-	// Try common environment variable names
-	if token := os.Getenv("GHCR_TOKEN"); token != "" {
-		return token
+	// Parse JSON
+	var entries []SBuildEntry
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return nil, fmt.Errorf("failed to parse SBUILD_LIST: %w", err)
 	}
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		return token
-	}
-	if token := os.Getenv("GH_TOKEN"); token != "" {
-		return token
-	}
-	return ""
-}
 
-// FilterBincachePackages filters GHCR packages for bincache
-func FilterBincachePackages(packages []GHCRPackage) []string {
-	var result []string
-
-	for _, pkg := range packages {
-		// Only public packages
-		if pkg.Visibility != "public" {
+	var packages []string
+	for _, entry := range entries {
+		// Skip disabled packages
+		if entry.Disabled {
 			continue
 		}
 
-		// Filter for bincache packages (not srcbuild)
-		if strings.Contains(pkg.Name, "-srcbuild") {
-			continue
-		}
-
-		if strings.Contains(pkg.Name, "bincache") {
-			result = append(result, pkg.Name)
-		}
-	}
-
-	return result
-}
-
-// FilterPkgcachePackages filters GHCR packages for pkgcache
-func FilterPkgcachePackages(packages []GHCRPackage) []string {
-	var result []string
-
-	for _, pkg := range packages {
-		// Only public packages
-		if pkg.Visibility != "public" {
-			continue
-		}
-
-		// Filter for pkgcache packages
-		if strings.Contains(pkg.Name, "pkgcache") {
-			result = append(result, pkg.Name)
+		// Extract package name from ghcr_pkg
+		// Format: "ghcr.io/pkgforge/bincache/40four/official"
+		// We want: "bincache/40four/official"
+		pkgName := strings.TrimPrefix(entry.GHCRPkg, "ghcr.io/pkgforge/")
+		if pkgName != "" {
+			packages = append(packages, pkgName)
 		}
 	}
 
-	return result
+	return packages, nil
 }
+

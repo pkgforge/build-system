@@ -199,7 +199,7 @@ jobs:
         run: |
           echo "Installing system dependencies..."
           sudo apt-get update
-          sudo apt-get install -y curl wget git build-essential jq coreutils grep findutils tar gzip bzip2 xz-utils zstd file sed gawk
+          sudo apt-get install -y curl wget git build-essential jq coreutils grep findutils tar gzip bzip2 xz-utils zstd file sed gawk minisign
 
           echo ""
           echo "Installing pkgforge tools..."
@@ -289,6 +289,8 @@ jobs:
 
       - name: Build packages for ${{ matrix.arch }}
         id: build
+        env:
+          MINISIGN_KEY_CONTENT: ${{ secrets.MINISIGN_PRIVATE_KEY }}
         run: |
           # Show what's in the queue
           echo "=== Build Queue Status ==="

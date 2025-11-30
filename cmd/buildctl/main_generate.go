@@ -103,24 +103,9 @@ Examples:
 			fmt.Printf("  - Failed: %d\n", stats.Failed)
 			fmt.Printf("  - Success rate: %.2f%%\n", stats.SuccessRate)
 
-			// Fetch GHCR packages once if needed for bincache or pkgcache generation
-			var ghcrPackages []metadata.GHCRPackage
-			if genBincache || genPkgcache {
-				fmt.Println("\n" + strings.Repeat("=", 50))
-				fmt.Println("Fetching GHCR package list (shared for all metadata types)...")
-				fmt.Println(strings.Repeat("=", 50))
-
-				var err error
-				ghcrPackages, err = metadata.FetchGHCRPackages()
-				if err != nil {
-					return fmt.Errorf("failed to fetch GHCR packages: %w", err)
-				}
-				fmt.Printf("Found %d total GHCR packages\n\n", len(ghcrPackages))
-			}
-
 			// Generate bincache metadata if requested
 			if genBincache {
-				fmt.Println(strings.Repeat("=", 50))
+				fmt.Println("\n" + strings.Repeat("=", 50))
 				fmt.Println("Generating bincache metadata...")
 				fmt.Println(strings.Repeat("=", 50))
 
@@ -130,7 +115,7 @@ Examples:
 					SoarqlPath: "/usr/local/bin/soarql",
 					Parallel:   parallel,
 					Type:       "bincache",
-				}).WithGHCRPackages(ghcrPackages)
+				})
 
 				if err := gen.Generate(); err != nil {
 					return fmt.Errorf("failed to generate bincache metadata: %w", err)
@@ -149,7 +134,7 @@ Examples:
 					SoarqlPath: "/usr/local/bin/soarql",
 					Parallel:   parallel,
 					Type:       "pkgcache",
-				}).WithGHCRPackages(ghcrPackages)
+				})
 
 				if err := gen.Generate(); err != nil {
 					return fmt.Errorf("failed to generate pkgcache metadata: %w", err)

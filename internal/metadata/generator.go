@@ -17,19 +17,12 @@ type GeneratorConfig struct {
 
 // Generator handles metadata generation
 type Generator struct {
-	config       GeneratorConfig
-	ghcrPackages []GHCRPackage // Optional pre-fetched packages
+	config GeneratorConfig
 }
 
 // NewGenerator creates a new metadata generator
 func NewGenerator(config GeneratorConfig) *Generator {
 	return &Generator{config: config}
-}
-
-// WithGHCRPackages sets pre-fetched GHCR packages to avoid redundant API calls
-func (g *Generator) WithGHCRPackages(packages []GHCRPackage) *Generator {
-	g.ghcrPackages = packages
-	return g
 }
 
 // Generate runs the full metadata generation pipeline
@@ -41,32 +34,25 @@ func (g *Generator) Generate() error {
 		return fmt.Errorf("soarql not found at %s - please install it first", g.config.SoarqlPath)
 	}
 
-	// Step 2: Get GHCR packages (fetch if not already provided)
-	var ghcrPackages []GHCRPackage
-	if len(g.ghcrPackages) > 0 {
-		fmt.Printf("Using pre-fetched GHCR package list (%d packages)\n", len(g.ghcrPackages))
-		ghcrPackages = g.ghcrPackages
-	} else {
-		fmt.Println("Fetching GHCR package list...")
-		var err error
-		ghcrPackages, err = FetchGHCRPackages()
-		if err != nil {
-			return fmt.Errorf("failed to fetch GHCR packages: %w", err)
-		}
-		fmt.Printf("Found %d total GHCR packages\n", len(ghcrPackages))
-	}
-
-	// Step 3: Filter packages based on type
+	// Step 2: Fetch package list from SBUILD_LIST.json (with release asset fallback)
 	var packages []string
+	var err error
+
+	fmt.Printf("Fetching %s package list...\n", g.config.Type)
+
 	if g.config.Type == "bincache" {
-		packages = FilterBincachePackages(ghcrPackages)
+		packages, err = FetchPackagesFromSBuildList(BincacheReleaseURL, BincacheFallbackURL)
 	} else if g.config.Type == "pkgcache" {
-		packages = FilterPkgcachePackages(ghcrPackages)
+		packages, err = FetchPackagesFromSBuildList(PkgcacheReleaseURL, PkgcacheFallbackURL)
 	} else {
 		return fmt.Errorf("invalid type: %s (must be 'bincache' or 'pkgcache')", g.config.Type)
 	}
 
-	fmt.Printf("Filtered to %d %s packages\n", len(packages), g.config.Type)
+	if err != nil {
+		return fmt.Errorf("failed to fetch package list: %w", err)
+	}
+
+	fmt.Printf("Found %d %s packages\n", len(packages), g.config.Type)
 
 	if len(packages) == 0 {
 		return fmt.Errorf("no packages found for %s", g.config.Type)

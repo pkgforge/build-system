@@ -39,6 +39,19 @@ func (u *Uploader) UploadPackage(build *models.Build, pkgDir string) error {
 		return fmt.Errorf("no files found in package directory: %s", pkgDir)
 	}
 
+	// Sign all package files with minisign before uploading
+	if err := u.signPackageFiles(files); err != nil {
+		fmt.Printf("    ⚠ Warning: Failed to sign package files: %v\n", err)
+		fmt.Printf("    Continuing upload without signatures...\n")
+		// Don't fail the upload if signing fails - just warn
+	}
+
+	// Re-scan directory to include .minisig files
+	files, err = filepath.Glob(filepath.Join(pkgDir, "*"))
+	if err != nil {
+		return fmt.Errorf("failed to list package files after signing: %w", err)
+	}
+
 	// Determine repository based on recipe path
 	repo := u.determineRepo(build.RecipePath)
 
@@ -129,4 +142,59 @@ func (u *Uploader) extractPackageNames(recipePath string) (family, name string) 
 	}
 
 	return family, name
+}
+
+// signPackageFiles signs all files with minisign before upload
+func (u *Uploader) signPackageFiles(files []string) error {
+	// Check if minisign is available
+	if _, err := exec.LookPath("minisign"); err != nil {
+		return fmt.Errorf("minisign not found in PATH")
+	}
+
+	// Check if private key is in environment variable
+	keyContent := os.Getenv("MINISIGN_KEY_CONTENT")
+	if keyContent == "" {
+		return fmt.Errorf("MINISIGN_KEY_CONTENT environment variable not set")
+	}
+
+	// Create temporary key file
+	tmpKey, err := os.CreateTemp("", "minisign-*.key")
+	if err != nil {
+		return fmt.Errorf("failed to create temp key file: %w", err)
+	}
+	defer os.Remove(tmpKey.Name())
+
+	if _, err := tmpKey.WriteString(keyContent); err != nil {
+		tmpKey.Close()
+		return fmt.Errorf("failed to write key content: %w", err)
+	}
+	tmpKey.Close()
+
+	// Sign each file
+	signedCount := 0
+	for _, file := range files {
+		// Skip directories
+		fileInfo, err := os.Stat(file)
+		if err != nil || fileInfo.IsDir() {
+			continue
+		}
+
+		// Skip existing .minisig files
+		if strings.HasSuffix(file, ".minisig") {
+			continue
+		}
+
+		// Sign the file
+		cmd := exec.Command("minisign", "-S", "-s", tmpKey.Name(), "-m", file)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Printf("    ⚠ Failed to sign %s: %v\n", filepath.Base(file), err)
+			fmt.Printf("    Output: %s\n", string(output))
+			continue
+		}
+
+		signedCount++
+	}
+
+	fmt.Printf("    ✓ Signed %d package files with minisign\n", signedCount)
+	return nil
 }
