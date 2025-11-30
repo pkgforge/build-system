@@ -459,9 +459,6 @@ func (u *Uploader) generateSingleMetadataJSON(pkgInfo *PackageInfo, pkgDir strin
 	manifestURL := fmt.Sprintf("https://api.ghcr.pkgforge.dev/pkgforge/%s/%s/%s/%s?tag=%s-%s&manifest",
 		repo, pkgFamilySanitized, buildType, pkgNameSanitized, versionSanitized, archNormalized)
 
-	metadataURL := fmt.Sprintf("https://api.ghcr.pkgforge.dev/pkgforge/%s/%s/%s/%s?tag=%s-%s&download=%s.json",
-		repo, pkgFamilySanitized, buildType, pkgNameSanitized, versionSanitized, archNormalized, targetName)
-
 	buildLogURL := fmt.Sprintf("https://api.ghcr.pkgforge.dev/pkgforge/%s/%s/%s/%s?tag=%s-%s&download=%s.log",
 		repo, pkgFamilySanitized, buildType, pkgNameSanitized, versionSanitized, archNormalized, targetName)
 
