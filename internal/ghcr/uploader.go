@@ -20,19 +20,34 @@ type Uploader struct {
 
 // PackageInfo holds metadata extracted from recipe or generated files
 type PackageInfo struct {
-	Pkg         string   `json:"pkg" yaml:"pkg"`             // Simple package name
-	PkgName     string   `json:"pkg_name" yaml:"pkg_name"`   // Display name
-	PkgFamily   string   `json:"pkg_family" yaml:"pkg_family"`
-	Version     string   `json:"version" yaml:"version"`
-	Description string   `json:"description" yaml:"description"`
-	Homepage    string   `json:"homepage" yaml:"homepage"`
-	SrcURL      string   `json:"src_url" yaml:"src_url"`
-	Provides    []string `json:"provides" yaml:"provides"`
-	BSum        string   `json:"bsum,omitempty"`
-	ShaSum      string   `json:"shasum,omitempty"`
-	Size        string   `json:"size,omitempty"`
-	SizeRaw     int64    `json:"size_raw,omitempty"`
-	BuildDate   string   `json:"build_date,omitempty"`
+	Pkg              string        `json:"pkg" yaml:"pkg"`                             // Base package name (e.g., "a-utils.static")
+	PkgName          string        `json:"pkg_name" yaml:"pkg_name"`                   // Specific binary name
+	PkgFamily        string        `json:"pkg_family" yaml:"pkg_family"`               // Package family
+	PkgID            string        `json:"pkg_id" yaml:"pkg_id"`                       // Unique identifier
+	Version          string        `json:"version" yaml:"version"`                     // Version
+	VersionUpstream  string        `json:"version_upstream,omitempty" yaml:"version_upstream,omitempty"`
+	Description      string        `json:"description" yaml:"description"`             // Description
+	Homepage         interface{}   `json:"homepage" yaml:"homepage"`                   // Can be string or array
+	SrcURL           interface{}   `json:"src_url" yaml:"src_url"`                     // Can be string or array
+	Provides         []string      `json:"provides" yaml:"provides"`                   // Provided binaries
+	Category         interface{}   `json:"category,omitempty" yaml:"category,omitempty"` // Can be string or array
+	License          interface{}   `json:"license,omitempty" yaml:"license,omitempty"`   // Can be string or array
+	Maintainer       interface{}   `json:"maintainer,omitempty" yaml:"maintainer,omitempty"` // Can be string or array
+	Note             interface{}   `json:"note,omitempty" yaml:"note,omitempty"`       // Can be string or array
+	Tag              interface{}   `json:"tag,omitempty" yaml:"tag,omitempty"`         // Can be string or array
+	Repology         interface{}   `json:"repology,omitempty" yaml:"repology,omitempty"` // Can be string or array
+	Screenshots      interface{}   `json:"screenshots,omitempty" yaml:"screenshots,omitempty"` // Can be string or array
+	Icon             string        `json:"icon,omitempty" yaml:"icon,omitempty"`       // Icon URL
+	Desktop          string        `json:"desktop,omitempty" yaml:"desktop,omitempty"` // Desktop file
+	AppID            string        `json:"app_id,omitempty" yaml:"app_id,omitempty"`   // Application ID
+	Appstream        string        `json:"appstream,omitempty" yaml:"appstream,omitempty"` // Appstream
+	BSum             string        `json:"bsum,omitempty"`
+	ShaSum           string        `json:"shasum,omitempty"`
+	Size             string        `json:"size,omitempty"`
+	SizeRaw          int64         `json:"size_raw,omitempty"`
+	BuildDate        string        `json:"build_date,omitempty"`
+	Rank             string        `json:"rank,omitempty" yaml:"rank,omitempty"`
+	Disabled         string        `json:"_disabled,omitempty" yaml:"_disabled,omitempty"`
 }
 
 // NewUploader creates a new GHCR uploader
@@ -230,7 +245,7 @@ func (u *Uploader) extractPackageInfo(build *models.Build, pkgDir string) (*Pack
 		}
 		var metadata map[string]interface{}
 		if err := json.Unmarshal(data, &metadata); err == nil {
-			// Extract fields from JSON metadata
+			// Extract all fields from JSON metadata
 			if v, ok := metadata["pkg"].(string); ok && v != "" {
 				pkgInfo.Pkg = v
 			}
@@ -240,16 +255,24 @@ func (u *Uploader) extractPackageInfo(build *models.Build, pkgDir string) (*Pack
 			if v, ok := metadata["pkg_family"].(string); ok && v != "" {
 				pkgInfo.PkgFamily = v
 			}
+			if v, ok := metadata["pkg_id"].(string); ok && v != "" {
+				pkgInfo.PkgID = v
+			}
 			if v, ok := metadata["version"].(string); ok && v != "" {
 				pkgInfo.Version = v
+			}
+			if v, ok := metadata["version_upstream"].(string); ok && v != "" {
+				pkgInfo.VersionUpstream = v
 			}
 			if v, ok := metadata["description"].(string); ok {
 				pkgInfo.Description = v
 			}
-			if v, ok := metadata["homepage"].(string); ok {
+			// Homepage can be string or array
+			if v, ok := metadata["homepage"]; ok && v != nil {
 				pkgInfo.Homepage = v
 			}
-			if v, ok := metadata["src_url"].(string); ok {
+			// SrcURL can be string or array
+			if v, ok := metadata["src_url"]; ok && v != nil {
 				pkgInfo.SrcURL = v
 			}
 			if v, ok := metadata["provides"].([]interface{}); ok {
@@ -258,6 +281,46 @@ func (u *Uploader) extractPackageInfo(build *models.Build, pkgDir string) (*Pack
 						pkgInfo.Provides = append(pkgInfo.Provides, s)
 					}
 				}
+			}
+			// Optional fields (can be string or array)
+			if v, ok := metadata["category"]; ok && v != nil {
+				pkgInfo.Category = v
+			}
+			if v, ok := metadata["license"]; ok && v != nil {
+				pkgInfo.License = v
+			}
+			if v, ok := metadata["maintainer"]; ok && v != nil {
+				pkgInfo.Maintainer = v
+			}
+			if v, ok := metadata["note"]; ok && v != nil {
+				pkgInfo.Note = v
+			}
+			if v, ok := metadata["tag"]; ok && v != nil {
+				pkgInfo.Tag = v
+			}
+			if v, ok := metadata["repology"]; ok && v != nil {
+				pkgInfo.Repology = v
+			}
+			if v, ok := metadata["screenshots"]; ok && v != nil {
+				pkgInfo.Screenshots = v
+			}
+			if v, ok := metadata["icon"].(string); ok {
+				pkgInfo.Icon = v
+			}
+			if v, ok := metadata["desktop"].(string); ok {
+				pkgInfo.Desktop = v
+			}
+			if v, ok := metadata["app_id"].(string); ok {
+				pkgInfo.AppID = v
+			}
+			if v, ok := metadata["appstream"].(string); ok {
+				pkgInfo.Appstream = v
+			}
+			if v, ok := metadata["rank"].(string); ok {
+				pkgInfo.Rank = v
+			}
+			if v, ok := metadata["_disabled"].(string); ok {
+				pkgInfo.Disabled = v
 			}
 			if v, ok := metadata["bsum"].(string); ok {
 				pkgInfo.BSum = v
@@ -293,17 +356,39 @@ func (u *Uploader) extractPackageInfo(build *models.Build, pkgDir string) (*Pack
 				if v, ok := recipe["pkg_family"].(string); ok && pkgInfo.PkgFamily == "" {
 					pkgInfo.PkgFamily = v
 				}
+				if v, ok := recipe["pkg_id"].(string); ok && pkgInfo.PkgID == "" {
+					pkgInfo.PkgID = v
+				}
 				if v, ok := recipe["version"].(string); ok && pkgInfo.Version == "" {
 					pkgInfo.Version = v
+				}
+				if v, ok := recipe["version_upstream"].(string); ok && pkgInfo.VersionUpstream == "" {
+					pkgInfo.VersionUpstream = v
 				}
 				if v, ok := recipe["description"].(string); ok && pkgInfo.Description == "" {
 					pkgInfo.Description = v
 				}
-				if v, ok := recipe["homepage"].(string); ok && pkgInfo.Homepage == "" {
+				if v, ok := recipe["homepage"]; ok && pkgInfo.Homepage == nil {
 					pkgInfo.Homepage = v
 				}
-				if v, ok := recipe["src_url"].(string); ok && pkgInfo.SrcURL == "" {
+				if v, ok := recipe["src_url"]; ok && pkgInfo.SrcURL == nil {
 					pkgInfo.SrcURL = v
+				}
+				// Read other fields from YAML
+				if v, ok := recipe["category"]; ok && pkgInfo.Category == nil {
+					pkgInfo.Category = v
+				}
+				if v, ok := recipe["license"]; ok && pkgInfo.License == nil {
+					pkgInfo.License = v
+				}
+				if v, ok := recipe["maintainer"]; ok && pkgInfo.Maintainer == nil {
+					pkgInfo.Maintainer = v
+				}
+				if v, ok := recipe["note"]; ok && pkgInfo.Note == nil {
+					pkgInfo.Note = v
+				}
+				if v, ok := recipe["tag"]; ok && pkgInfo.Tag == nil {
+					pkgInfo.Tag = v
 				}
 			}
 		}
@@ -387,52 +472,68 @@ func (u *Uploader) generateSingleMetadataJSON(pkgInfo *PackageInfo, pkgDir strin
 	}
 
 	// Package webpage
-	pkgWebpage := fmt.Sprintf("https://pkgs.pkgforge.dev/repo/%s/%s/%s/%s/%s",
-		repo, archNormalized, pkgFamilySanitized, buildType, pkgNameSanitized)
+	pkgWebpage := fmt.Sprintf("https://pkgs.pkgforge.dev/repo/%s/%s/%s/%s",
+		repo, archNormalized, pkgFamilySanitized, pkgNameSanitized)
 
 	// Build comprehensive metadata
 	metadata := map[string]interface{}{
-		"pkg":          targetName,
-		"pkg_name":     targetName,
-		"pkg_family":   pkgInfo.PkgFamily,
-		"pkg_id":       build.PkgID,
-		"pkg_type":     buildType,
-		"pkg_webpage":  pkgWebpage,
-		"version":      pkgInfo.Version,
-		"description":  pkgInfo.Description,
-		"homepage":     pkgInfo.Homepage,
-		"src_url":      pkgInfo.SrcURL,
-		"provides":     pkgInfo.Provides,
-		"build_date":   pkgInfo.BuildDate,
-		"build_id":     fmt.Sprintf("%d", build.ID),
-		"build_gha":    buildGHA,
-		"build_log":    buildLogURL,
-		"build_script": build.RecipePath,
-		"host":         build.Arch,
-		"ghcr_pkg":     ghcrPkg,
-		"ghcr_url":     "https://" + ghcrURL,
-		"download_url": downloadURL,
-		"manifest_url": manifestURL,
-		"metadata_url": metadataURL,
+		"_disabled":         pkgInfo.Disabled,
+		"host":              build.Arch,
+		"rank":              pkgInfo.Rank,
+		"pkg":               pkgInfo.Pkg,          // Base package name (e.g., "a-utils.static")
+		"pkg_family":        pkgInfo.PkgFamily,    // Package family (e.g., "a-utils")
+		"pkg_id":            pkgInfo.PkgID,        // Unique ID (e.g., "github.com.xplshn.a-utils")
+		"pkg_name":          targetName,           // Specific binary name (e.g., "printf")
+		"pkg_type":          buildType,            // Build type
+		"pkg_webpage":       pkgWebpage,
+		"app_id":            pkgInfo.AppID,
+		"appstream":         pkgInfo.Appstream,
+		"category":          pkgInfo.Category,
+		"description":       pkgInfo.Description,
+		"desktop":           pkgInfo.Desktop,
+		"homepage":          pkgInfo.Homepage,
+		"icon":              pkgInfo.Icon,
+		"license":           pkgInfo.License,
+		"maintainer":        pkgInfo.Maintainer,
+		"provides":          pkgInfo.Provides,
+		"note":              pkgInfo.Note,
+		"repology":          pkgInfo.Repology,
+		"screenshots":       pkgInfo.Screenshots,
+		"src_url":           pkgInfo.SrcURL,
+		"tag":               pkgInfo.Tag,
+		"version":           pkgInfo.Version,
+		"version_upstream":  pkgInfo.VersionUpstream,
+		"bsum":              pkgInfo.BSum,
+		"build_date":        pkgInfo.BuildDate,
+		"build_gha":         buildGHA,
+		"build_id":          fmt.Sprintf("%d", build.ID),
+		"build_log":         buildLogURL,
+		"build_script":      build.RecipePath,
+		"download_url":      downloadURL,
+		"ghcr_pkg":          ghcrPkg,
+		"ghcr_url":          "https://" + ghcrURL,
+		"manifest_url":      manifestURL,
+		"shasum":            pkgInfo.ShaSum,
+		"size":              pkgInfo.Size,
+		"size_raw":          pkgInfo.SizeRaw,
+		"snapshots":         []string{},
 	}
 
-	// Add checksums if available
-	if pkgInfo.BSum != "" {
-		metadata["bsum"] = pkgInfo.BSum
-	}
-	if pkgInfo.ShaSum != "" {
-		metadata["shasum"] = pkgInfo.ShaSum
-	}
-	if pkgInfo.Size != "" {
-		metadata["size"] = pkgInfo.Size
-	}
-	if pkgInfo.SizeRaw > 0 {
-		metadata["size_raw"] = pkgInfo.SizeRaw
+	// Remove empty/nil values to keep JSON clean
+	cleanMetadata := make(map[string]interface{})
+	for k, v := range metadata {
+		if v != nil && v != "" && v != 0 && v != int64(0) {
+			// Keep non-empty values
+			cleanMetadata[k] = v
+		} else if k == "_disabled" || k == "rank" || k == "snapshots" || k == "provides" {
+			// Always include these fields even if empty
+			cleanMetadata[k] = v
+		}
 	}
 
 	// Write JSON to file
 	jsonPath := filepath.Join(pkgDir, fmt.Sprintf("%s.json", targetName))
-	jsonData, err := json.MarshalIndent(metadata, "", "  ")
+	jsonData, err := json.MarshalIndent(cleanMetadata, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
