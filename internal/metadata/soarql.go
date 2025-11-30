@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -67,68 +66,87 @@ func ensureGHCRLogin(orasPath string) error {
 
 var pullErrorCount = 0
 
-// QueryPackageMetadata uses oras to fetch metadata for a package from GHCR
+// QueryPackageMetadata fetches metadata from GHCR package manifest annotations
 func QueryPackageMetadata(config FetchConfig, ghcrPkg string) (*PackageMetadata, error) {
-	// Construct GHCR image reference
-	// Input format: "bincache/40four/official" or just "40four/official"
-	// Output format: "ghcr.io/pkgforge/bincache/40four/official:x86_64-Linux"
-
-	var imageRef string
+	// Construct GHCR package reference (without tag)
+	var pkgRef string
 	if strings.HasPrefix(ghcrPkg, "ghcr.io/") {
-		// Already has full prefix
-		imageRef = fmt.Sprintf("%s:%s", ghcrPkg, config.Arch)
+		pkgRef = ghcrPkg
 	} else {
-		// Add ghcr.io/pkgforge/ prefix if needed
-		imageRef = fmt.Sprintf("ghcr.io/pkgforge/%s:%s", ghcrPkg, config.Arch)
+		pkgRef = fmt.Sprintf("ghcr.io/pkgforge/%s", ghcrPkg)
 	}
 
-	// Create temporary directory for package extraction
-	tmpDir, err := os.MkdirTemp(config.WorkDir, "pkg-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Pull package from GHCR using oras
-	cmd := exec.Command(config.OrasPath, "pull", imageRef)
-	cmd.Dir = tmpDir
+	// Step 1: Get latest tag for this architecture
+	cmd := exec.Command(config.OrasPath, "repo", "tags", pkgRef)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Log the first few errors for debugging
 		pullErrorCount++
 		if pullErrorCount <= 3 {
-			fmt.Printf("    ⚠ Failed to pull %s: %v\n", imageRef, err)
-			fmt.Printf("       Output: %s\n", string(output))
+			fmt.Printf("    ⚠ Failed to list tags for %s: %v\n", pkgRef, err)
 		}
 		return nil, nil
 	}
 
-	// Look for .METADATA or metadata.json file
-	metadataFiles := []string{".METADATA", "metadata.json", ".INFO"}
-	var metaFile string
-	for _, name := range metadataFiles {
-		path := filepath.Join(tmpDir, name)
-		if _, err := os.Stat(path); err == nil {
-			metaFile = path
-			break
+	// Find the latest tag matching the architecture
+	// Format: HEAD-hash-dateThms-x86_64-Linux or version-x86_64-Linux
+	var latestTag string
+	archPattern := strings.ToLower(config.Arch) // x86_64-Linux -> x86_64-linux
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		tag := strings.TrimSpace(scanner.Text())
+		// Skip srcbuild tags and match architecture
+		if !strings.Contains(tag, "srcbuild") && strings.Contains(strings.ToLower(tag), archPattern) {
+			latestTag = tag
 		}
 	}
 
-	if metaFile == "" {
-		// No metadata file found, construct basic metadata from package info
-		return constructBasicMetadata(ghcrPkg, config.Arch), nil
+	if latestTag == "" {
+		pullErrorCount++
+		if pullErrorCount <= 3 {
+			fmt.Printf("    ⚠ No tag found for %s with arch %s\n", pkgRef, config.Arch)
+		}
+		return nil, nil
 	}
 
-	// Read and parse metadata file
-	data, err := os.ReadFile(metaFile)
+	// Step 2: Fetch manifest for the tag
+	imageRef := fmt.Sprintf("%s:%s", pkgRef, latestTag)
+	cmd = exec.Command(config.OrasPath, "manifest", "fetch", imageRef)
+	output, err = cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata: %w", err)
+		pullErrorCount++
+		if pullErrorCount <= 3 {
+			fmt.Printf("    ⚠ Failed to fetch manifest for %s: %v\n", imageRef, err)
+		}
+		return nil, nil
 	}
 
+	// Step 3: Parse manifest JSON and extract metadata from annotations
+	var manifest struct {
+		Annotations map[string]string `json:"annotations"`
+	}
+	if err := json.Unmarshal(output, &manifest); err != nil {
+		pullErrorCount++
+		if pullErrorCount <= 3 {
+			fmt.Printf("    ⚠ Failed to parse manifest for %s: %v\n", imageRef, err)
+		}
+		return nil, nil
+	}
+
+	// Extract metadata from annotation
+	metaJSON, ok := manifest.Annotations["dev.pkgforge.soar.json"]
+	if !ok {
+		// No metadata annotation, skip
+		return nil, nil
+	}
+
+	// Parse metadata JSON
 	var meta PackageMetadata
-	if err := json.Unmarshal(data, &meta); err != nil {
-		// If parsing fails, try to extract basic info
-		return constructBasicMetadata(ghcrPkg, config.Arch), nil
+	if err := json.Unmarshal([]byte(metaJSON), &meta); err != nil {
+		pullErrorCount++
+		if pullErrorCount <= 3 {
+			fmt.Printf("    ⚠ Failed to parse metadata JSON for %s: %v\n", imageRef, err)
+		}
+		return nil, nil
 	}
 
 	return &meta, nil

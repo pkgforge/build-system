@@ -112,6 +112,34 @@ func verifyMinisign(dataPath, sigPath, pubKeyPath string) error {
 	return nil
 }
 
+// DownloadMetadata downloads metadata JSON from meta.pkgforge.dev
+func DownloadMetadata(url, outputPath string) error {
+	client := &http.Client{Timeout: 120 * time.Second}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to fetch metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to fetch metadata: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read metadata: %w", err)
+	}
+
+	// Write to output file
+	if err := os.WriteFile(outputPath, body, 0644); err != nil {
+		return fmt.Errorf("failed to write metadata file: %w", err)
+	}
+
+	fmt.Printf("  ✓ Downloaded %d bytes\n", len(body))
+	return nil
+}
+
 // FetchPackagesFromSBuildList fetches package names from SBUILD_LIST.json
 // with release asset fallback and optional minisign verification
 func FetchPackagesFromSBuildList(primaryURL, fallbackURL string) ([]string, error) {

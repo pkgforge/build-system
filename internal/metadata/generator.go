@@ -59,7 +59,7 @@ func (g *Generator) Generate() error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Step 5: Generate JSON metadata using oras
+	// Step 5: Generate JSON metadata from GHCR manifests
 	jsonPath := filepath.Join(outputDir, fmt.Sprintf("%s.json", g.config.Arch))
 	fetchConfig := FetchConfig{
 		OrasPath: "oras", // Use oras from PATH
@@ -67,7 +67,7 @@ func (g *Generator) Generate() error {
 		WorkDir:  "/tmp",
 	}
 
-	fmt.Println("Generating metadata from GHCR packages...")
+	fmt.Println("Generating metadata from GHCR package manifests...")
 	if err := GenerateMetadataForPackages(fetchConfig, packages, jsonPath, g.config.Parallel); err != nil {
 		return fmt.Errorf("failed to generate metadata: %w", err)
 	}
