@@ -323,6 +323,21 @@ func (u *Uploader) extractPackageInfo(build *models.Build, pkgDir string) (*Pack
 		}
 	}
 
+	// Read version from .version file if exists and version not already set
+	if pkgInfo.Version == "" {
+		versionFiles, _ := filepath.Glob(filepath.Join(pkgDir, "*.version"))
+		for _, versionFile := range versionFiles {
+			data, err := os.ReadFile(versionFile)
+			if err == nil {
+				version := strings.TrimSpace(string(data))
+				if version != "" {
+					pkgInfo.Version = version
+					break
+				}
+			}
+		}
+	}
+
 	// Second priority: Try to read generated metadata JSON (if it exists)
 	jsonFiles, _ := filepath.Glob(filepath.Join(pkgDir, "*.json"))
 	for _, jsonFile := range jsonFiles {
