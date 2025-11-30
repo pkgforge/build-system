@@ -145,36 +145,37 @@ jobs:
           echo "Fetched SBUILD_LIST.json files:"
           ls -lh artifacts/*-SBUILD_LIST.json
 
-      - name: Sign all artifacts with minisign
-        env:
-          MINISIGN_KEY_CONTENT: ${{ secrets.MINISIGN_PRIVATE_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "Signing all artifacts recursively"
-          echo "=========================================="
-
-          # Find all files in artifacts directory (excluding .sig files)
-          FILES=$(find artifacts -type f ! -name "*.sig" | sort)
-
-          if [ -z "$FILES" ]; then
-            echo "No files found to sign"
-            exit 1
-          fi
-
-          echo "Files to sign:"
-          echo "$FILES"
-          echo ""
-
-          # Sign all files
-          ./scripts/sign-sbuild-lists.sh $FILES
-
-          echo ""
-          echo "=========================================="
-          echo "Generated signatures"
-          echo "=========================================="
-          find artifacts -type f -name "*.sig" | sort
+      # TODO: Re-enable signing once the password piping issue is resolved
+      # - name: Sign all artifacts with minisign
+      #   env:
+      #     MINISIGN_KEY_CONTENT: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+      #     MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+      #   run: |
+      #     echo ""
+      #     echo "=========================================="
+      #     echo "Signing all artifacts recursively"
+      #     echo "=========================================="
+      #
+      #     # Find all files in artifacts directory (excluding .sig files)
+      #     FILES=$(find artifacts -type f ! -name "*.sig" | sort)
+      #
+      #     if [ -z "$FILES" ]; then
+      #       echo "No files found to sign"
+      #       exit 1
+      #     fi
+      #
+      #     echo "Files to sign:"
+      #     echo "$FILES"
+      #     echo ""
+      #
+      #     # Sign all files
+      #     ./scripts/sign-sbuild-lists.sh $FILES
+      #
+      #     echo ""
+      #     echo "=========================================="
+      #     echo "Generated signatures"
+      #     echo "=========================================="
+      #     find artifacts -type f -name "*.sig" | sort
 
       - name: Upload metadata artifacts
         uses: actions/upload-artifact@v4
