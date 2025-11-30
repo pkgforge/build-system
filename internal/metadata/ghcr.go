@@ -112,6 +112,77 @@ func verifyMinisign(dataPath, sigPath, pubKeyPath string) error {
 	return nil
 }
 
+// GHCRPackage represents a package from GHCR_PKGS.json
+type GHCRPackageInfo struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"` // e.g., "bincache/a-utils/official/cal"
+}
+
+// FetchGHCRPackageList downloads and parses GHCR_PKGS.json.zstd
+func FetchGHCRPackageList() ([]string, error) {
+	const ghcrPkgsURL = "https://raw.githubusercontent.com/pkgforge/metadata/refs/heads/main/GHCR_PKGS.json.zstd"
+
+	client := &http.Client{Timeout: 120 * time.Second}
+
+	fmt.Println("Downloading GHCR package list...")
+	resp, err := client.Get(ghcrPkgsURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch GHCR_PKGS.json.zstd: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch GHCR_PKGS: status %d", resp.StatusCode)
+	}
+
+	// Save compressed file temporarily
+	tmpFile, err := os.CreateTemp("", "ghcr-pkgs-*.json.zstd")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if _, err := tmpFile.Write(body); err != nil {
+		return nil, fmt.Errorf("failed to write temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Decompress with zstd
+	tmpJSON := tmpFile.Name() + ".json"
+	defer os.Remove(tmpJSON)
+
+	cmd := exec.Command("zstd", "-d", tmpFile.Name(), "-o", tmpJSON)
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("failed to decompress: %w", err)
+	}
+
+	// Read and parse JSON
+	data, err := os.ReadFile(tmpJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read JSON: %w", err)
+	}
+
+	var pkgs []GHCRPackageInfo
+	if err := json.Unmarshal(data, &pkgs); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	// Extract package names
+	var names []string
+	for _, pkg := range pkgs {
+		names = append(names, pkg.Name)
+	}
+
+	fmt.Printf("  ✓ Found %d GHCR packages\n", len(names))
+	return names, nil
+}
+
 // DownloadMetadata downloads metadata JSON from meta.pkgforge.dev
 func DownloadMetadata(url, outputPath string) error {
 	client := &http.Client{Timeout: 120 * time.Second}

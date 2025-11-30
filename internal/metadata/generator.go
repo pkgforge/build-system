@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // GeneratorConfig holds configuration for metadata generation
@@ -29,25 +30,49 @@ func NewGenerator(config GeneratorConfig) *Generator {
 func (g *Generator) Generate() error {
 	fmt.Printf("Starting metadata generation for %s (%s)\n", g.config.Type, g.config.Arch)
 
-	// Step 1: Fetch package list from SBUILD_LIST.json (with release asset fallback)
-	var packages []string
-	var err error
+	// Step 1: Fetch GHCR package list
+	fmt.Println("Fetching GHCR package list...")
+	allPackages, err := FetchGHCRPackageList()
+	if err != nil {
+		return fmt.Errorf("failed to fetch GHCR packages: %w", err)
+	}
 
-	fmt.Printf("Fetching %s package list...\n", g.config.Type)
-
+	// Step 2: Fetch SBUILD_LIST to get package families
+	fmt.Printf("Fetching %s SBUILD_LIST...\n", g.config.Type)
+	var sbuildURL, fallbackURL string
 	if g.config.Type == "bincache" {
-		packages, err = FetchPackagesFromSBuildList(BincacheReleaseURL, BincacheFallbackURL)
+		sbuildURL, fallbackURL = BincacheReleaseURL, BincacheFallbackURL
 	} else if g.config.Type == "pkgcache" {
-		packages, err = FetchPackagesFromSBuildList(PkgcacheReleaseURL, PkgcacheFallbackURL)
+		sbuildURL, fallbackURL = PkgcacheReleaseURL, PkgcacheFallbackURL
 	} else {
 		return fmt.Errorf("invalid type: %s (must be 'bincache' or 'pkgcache')", g.config.Type)
 	}
 
+	sbuildFamilies, err := FetchPackagesFromSBuildList(sbuildURL, fallbackURL)
 	if err != nil {
-		return fmt.Errorf("failed to fetch package list: %w", err)
+		return fmt.Errorf("failed to fetch SBUILD_LIST: %w", err)
 	}
 
-	fmt.Printf("Found %d %s packages\n", len(packages), g.config.Type)
+	// Step 3: Filter GHCR packages to match type and SBUILD families
+	var packages []string
+	for _, pkg := range allPackages {
+		// Check if package is of the right type (bincache/pkgcache)
+		if !strings.HasPrefix(pkg, g.config.Type+"/") {
+			continue
+		}
+
+		// Check if package matches any SBUILD family
+		for _, family := range sbuildFamilies {
+			// family is like "bincache/a-utils/official"
+			// pkg is like "bincache/a-utils/official/cal"
+			if strings.HasPrefix(pkg, family+"/") || pkg == family {
+				packages = append(packages, pkg)
+				break
+			}
+		}
+	}
+
+	fmt.Printf("Found %d %s packages matching SBUILD_LIST\n", len(packages), g.config.Type)
 
 	if len(packages) == 0 {
 		return fmt.Errorf("no packages found for %s", g.config.Type)
