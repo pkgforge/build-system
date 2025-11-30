@@ -14,34 +14,17 @@ if ! command -v minisign &> /dev/null; then
     exit 1
 fi
 
-# Function to sign a file
+# Function to sign a file (requires tmp_key to be set by caller)
 sign_file() {
     local file="$1"
+    local tmp_key="$2"
 
     if [ ! -f "$file" ]; then
         echo "Error: File not found: $file"
         return 1
     fi
 
-    # Check if private key is in environment variable
-    if [ -z "${MINISIGN_KEY_CONTENT:-}" ]; then
-        echo "Error: MINISIGN_KEY_CONTENT environment variable not set!"
-        echo ""
-        echo "Set the private key content:"
-        echo "  export MINISIGN_KEY_CONTENT=\$(cat keys/minisign.key)"
-        echo ""
-        echo "Or in CI/CD, use GitHub Secret: MINISIGN_PRIVATE_KEY"
-        return 1
-    fi
-
     echo "Signing: $file"
-
-    # Create temporary key file from environment variable
-    local tmp_key=$(mktemp)
-    trap "rm -f $tmp_key" RETURN
-
-    echo "$MINISIGN_KEY_CONTENT" > "$tmp_key"
-    chmod 600 "$tmp_key"
 
     # Sign with temporary key
     # -S = sign
@@ -101,11 +84,34 @@ main() {
         files_to_sign=("$@")
     fi
 
+    # Check if private key is in environment variable
+    if [ -z "${MINISIGN_KEY_CONTENT:-}" ]; then
+        echo "Error: MINISIGN_KEY_CONTENT environment variable not set!"
+        echo ""
+        echo "Set the private key content:"
+        echo "  export MINISIGN_KEY_CONTENT=\$(cat keys/minisign.key)"
+        echo ""
+        echo "Or in CI/CD, use GitHub Secret: MINISIGN_PRIVATE_KEY"
+        exit 1
+    fi
+
+    # Create temporary key file from environment variable (once for all files)
+    local tmp_key=$(mktemp)
+    trap "rm -f $tmp_key" EXIT
+
+    echo "$MINISIGN_KEY_CONTENT" > "$tmp_key"
+    chmod 600 "$tmp_key"
+
     # Sign all files
     local signed_count=0
+    echo "Total files to sign: ${#files_to_sign[@]}"
     for file in "${files_to_sign[@]}"; do
-        if sign_file "$file"; then
+        echo ""
+        echo "Processing file $((signed_count + 1))/${#files_to_sign[@]}: $file"
+        if sign_file "$file" "$tmp_key"; then
             ((signed_count++))
+        else
+            echo "  ✗ Failed to sign: $file"
         fi
     done
 
