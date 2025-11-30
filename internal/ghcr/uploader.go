@@ -20,7 +20,8 @@ type Uploader struct {
 
 // PackageInfo holds metadata extracted from recipe or generated files
 type PackageInfo struct {
-	PkgName     string   `json:"pkg_name" yaml:"pkg_name"`
+	Pkg         string   `json:"pkg" yaml:"pkg"`             // Simple package name
+	PkgName     string   `json:"pkg_name" yaml:"pkg_name"`   // Display name
 	PkgFamily   string   `json:"pkg_family" yaml:"pkg_family"`
 	Version     string   `json:"version" yaml:"version"`
 	Description string   `json:"description" yaml:"description"`
@@ -42,6 +43,7 @@ func NewUploader() *Uploader {
 }
 
 // UploadPackage uploads a built package directory to GHCR
+// If the package provides multiple binaries, it uploads each one separately
 func (u *Uploader) UploadPackage(build *models.Build, pkgDir string) error {
 	// Check if package directory exists
 	if _, err := os.Stat(pkgDir); os.IsNotExist(err) {
@@ -86,34 +88,104 @@ func (u *Uploader) UploadPackage(build *models.Build, pkgDir string) error {
 		return fmt.Errorf("failed to list package files after signing: %w", err)
 	}
 
+	// Determine if we should upload for each provided binary
+	// If provides array has multiple items, upload once for each
+	// Otherwise, upload once with the main package name
+	uploadTargets := u.determineUploadTargets(pkgInfo)
+
+	if len(uploadTargets) == 0 {
+		return fmt.Errorf("no upload targets determined (no pkg, provides, pkg_name, or pkg_family)")
+	}
+
+	// Upload for each target
+	var uploadErrors []string
+	successCount := 0
+
+	for i, targetName := range uploadTargets {
+		if len(uploadTargets) > 1 {
+			fmt.Printf("    [%d/%d] Uploading variant: %s\n", i+1, len(uploadTargets), targetName)
+		}
+
+		if err := u.uploadSinglePackage(build, pkgDir, pkgInfo, targetName, files); err != nil {
+			errMsg := fmt.Sprintf("failed to upload %s: %v", targetName, err)
+			uploadErrors = append(uploadErrors, errMsg)
+			fmt.Printf("    ✗ %s\n", errMsg)
+		} else {
+			successCount++
+		}
+	}
+
+	// Return error if all uploads failed
+	if successCount == 0 {
+		return fmt.Errorf("all uploads failed: %v", strings.Join(uploadErrors, "; "))
+	}
+
+	// Warn if some uploads failed
+	if len(uploadErrors) > 0 {
+		fmt.Printf("    ⚠ Warning: %d/%d uploads succeeded, %d failed\n", successCount, len(uploadTargets), len(uploadErrors))
+	}
+
+	fmt.Printf("    ✓ Successfully uploaded %d package(s)\n", successCount)
+	return nil
+}
+
+// determineUploadTargets determines which package names to upload
+// If provides has multiple items, return all of them
+// Otherwise, return the single best package name
+func (u *Uploader) determineUploadTargets(pkgInfo *PackageInfo) []string {
+	// If provides has multiple items, upload for each one
+	if len(pkgInfo.Provides) > 1 {
+		return pkgInfo.Provides
+	}
+
+	// Otherwise, use priority: pkg > provides[0] > pkg_name > pkg_family
+	var targetName string
+	if pkgInfo.Pkg != "" {
+		targetName = pkgInfo.Pkg
+	} else if len(pkgInfo.Provides) == 1 && pkgInfo.Provides[0] != "" {
+		targetName = pkgInfo.Provides[0]
+	} else if pkgInfo.PkgName != "" {
+		targetName = pkgInfo.PkgName
+	} else if pkgInfo.PkgFamily != "" {
+		targetName = pkgInfo.PkgFamily
+	}
+
+	if targetName != "" {
+		return []string{targetName}
+	}
+
+	return []string{}
+}
+
+// uploadSinglePackage uploads a single package variant to GHCR
+func (u *Uploader) uploadSinglePackage(build *models.Build, pkgDir string, pkgInfo *PackageInfo, targetName string, files []string) error {
 	// Determine repository based on recipe path
 	repo := u.determineRepo(build.RecipePath)
 
 	// Extract build type from recipe filename (e.g., "static/official", "appimage/official/stable")
 	buildType := u.extractBuildType(build.RecipePath)
 
-	// Determine package name to use in GHCR path
-	// Priority: first item in provides > pkg_name > pkg_family
-	pkgName := pkgInfo.PkgName
-	if len(pkgInfo.Provides) > 0 && pkgInfo.Provides[0] != "" {
-		pkgName = pkgInfo.Provides[0]
-	}
-	if pkgName == "" {
-		pkgName = pkgInfo.PkgFamily
-	}
+	// Sanitize package name for GHCR (replace dots with hyphens, keep lowercase)
+	pkgNameSanitized := u.sanitizePackageName(targetName)
+
+	// Sanitize pkg_family as well
+	pkgFamilySanitized := u.sanitizePackageName(pkgInfo.PkgFamily)
 
 	// Normalize architecture (convert to lowercase)
 	archNormalized := strings.ToLower(build.Arch)
 
+	// Sanitize version (replace invalid characters)
+	versionSanitized := u.sanitizeVersion(pkgInfo.Version)
+
 	// Construct GHCR image name
 	// Format: ghcr.io/pkgforge/{repo}/{pkg_family}/{build_type}/{pkg_name}:{version}-{arch}
 	imageName := fmt.Sprintf("ghcr.io/pkgforge/%s/%s/%s/%s:%s-%s",
-		repo, pkgInfo.PkgFamily, buildType, pkgName, pkgInfo.Version, archNormalized)
+		repo, pkgFamilySanitized, buildType, pkgNameSanitized, versionSanitized, archNormalized)
 
 	fmt.Printf("    Uploading to GHCR: %s\n", imageName)
 
 	// Build oras push command with all files and annotations
-	args := u.buildOrasPushCommand(imageName, pkgInfo, build)
+	args := u.buildOrasPushCommand(imageName, pkgInfo, build, targetName)
 
 	// Add all files from the package directory as relative paths
 	for _, file := range files {
@@ -159,6 +231,9 @@ func (u *Uploader) extractPackageInfo(build *models.Build, pkgDir string) (*Pack
 		var metadata map[string]interface{}
 		if err := json.Unmarshal(data, &metadata); err == nil {
 			// Extract fields from JSON metadata
+			if v, ok := metadata["pkg"].(string); ok && v != "" {
+				pkgInfo.Pkg = v
+			}
 			if v, ok := metadata["pkg_name"].(string); ok && v != "" {
 				pkgInfo.PkgName = v
 			}
@@ -209,6 +284,9 @@ func (u *Uploader) extractPackageInfo(build *models.Build, pkgDir string) (*Pack
 		if err == nil {
 			var recipe map[string]interface{}
 			if err := yaml.Unmarshal(recipeData, &recipe); err == nil {
+				if v, ok := recipe["pkg"].(string); ok && pkgInfo.Pkg == "" {
+					pkgInfo.Pkg = v
+				}
 				if v, ok := recipe["pkg_name"].(string); ok && pkgInfo.PkgName == "" {
 					pkgInfo.PkgName = v
 				}
@@ -251,7 +329,13 @@ func (u *Uploader) generateMetadataJSON(pkgInfo *PackageInfo, pkgDir string, bui
 	}
 
 	// Generate metadata JSON
-	pkgName := pkgInfo.PkgName
+	pkgName := pkgInfo.Pkg
+	if pkgName == "" && len(pkgInfo.Provides) > 0 {
+		pkgName = pkgInfo.Provides[0]
+	}
+	if pkgName == "" {
+		pkgName = pkgInfo.PkgName
+	}
 	if pkgName == "" {
 		pkgName = pkgInfo.PkgFamily
 	}
@@ -300,7 +384,7 @@ func (u *Uploader) generateMetadataJSON(pkgInfo *PackageInfo, pkgDir string, bui
 }
 
 // buildOrasPushCommand builds the oras push command with annotations
-func (u *Uploader) buildOrasPushCommand(imageName string, pkgInfo *PackageInfo, build *models.Build) []string {
+func (u *Uploader) buildOrasPushCommand(imageName string, pkgInfo *PackageInfo, build *models.Build, targetName string) []string {
 	args := []string{
 		"push",
 		"--disable-path-validation",
@@ -311,7 +395,7 @@ func (u *Uploader) buildOrasPushCommand(imageName string, pkgInfo *PackageInfo, 
 	args = append(args,
 		"--annotation", fmt.Sprintf("org.opencontainers.image.created=%s", pkgInfo.BuildDate),
 		"--annotation", fmt.Sprintf("org.opencontainers.image.version=%s", pkgInfo.Version),
-		"--annotation", fmt.Sprintf("org.opencontainers.image.title=%s", pkgInfo.PkgName),
+		"--annotation", fmt.Sprintf("org.opencontainers.image.title=%s", targetName),
 		"--annotation", fmt.Sprintf("org.opencontainers.image.description=%s", pkgInfo.Description),
 		"--annotation", "org.opencontainers.image.vendor=pkgforge",
 		"--annotation", "org.opencontainers.image.licenses=blessing",
@@ -327,8 +411,8 @@ func (u *Uploader) buildOrasPushCommand(imageName string, pkgInfo *PackageInfo, 
 
 	// Add custom pkgforge annotations
 	args = append(args,
-		"--annotation", fmt.Sprintf("dev.pkgforge.soar.pkg=%s", pkgInfo.PkgName),
-		"--annotation", fmt.Sprintf("dev.pkgforge.soar.pkg_name=%s", pkgInfo.PkgName),
+		"--annotation", fmt.Sprintf("dev.pkgforge.soar.pkg=%s", targetName),
+		"--annotation", fmt.Sprintf("dev.pkgforge.soar.pkg_name=%s", targetName),
 		"--annotation", fmt.Sprintf("dev.pkgforge.soar.pkg_family=%s", pkgInfo.PkgFamily),
 		"--annotation", fmt.Sprintf("dev.pkgforge.soar.version=%s", pkgInfo.Version),
 		"--annotation", fmt.Sprintf("dev.pkgforge.soar.build_date=%s", pkgInfo.BuildDate),
@@ -479,4 +563,79 @@ func (u *Uploader) signPackageFiles(files []string) error {
 
 	fmt.Printf("    ✓ Signed %d package files with minisign\n", signedCount)
 	return nil
+}
+
+// sanitizePackageName sanitizes package name for GHCR repository path
+// GHCR/OCI registry naming rules:
+// - Must be lowercase
+// - Can contain: lowercase letters, digits, separators (period, underscores, dashes)
+// - But periods have restrictions in repository path components
+// Replace dots with hyphens for safety
+func (u *Uploader) sanitizePackageName(name string) string {
+	if name == "" {
+		return name
+	}
+
+	// Convert to lowercase
+	name = strings.ToLower(name)
+
+	// Replace dots with hyphens (dots cause issues in repository paths)
+	name = strings.ReplaceAll(name, ".", "-")
+
+	// Replace any other invalid characters with hyphens
+	// Valid characters: a-z, 0-9, _, -
+	result := strings.Builder{}
+	for _, ch := range name {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' {
+			result.WriteRune(ch)
+		} else {
+			result.WriteRune('-')
+		}
+	}
+
+	// Remove leading/trailing separators
+	sanitized := strings.Trim(result.String(), "-_")
+
+	// Replace multiple consecutive separators with single hyphen
+	for strings.Contains(sanitized, "--") || strings.Contains(sanitized, "__") || strings.Contains(sanitized, "_-") || strings.Contains(sanitized, "-_") {
+		sanitized = strings.ReplaceAll(sanitized, "--", "-")
+		sanitized = strings.ReplaceAll(sanitized, "__", "_")
+		sanitized = strings.ReplaceAll(sanitized, "_-", "-")
+		sanitized = strings.ReplaceAll(sanitized, "-_", "-")
+	}
+
+	return sanitized
+}
+
+// sanitizeVersion sanitizes version string for GHCR tag
+// OCI tag naming rules:
+// - Can contain: lowercase and uppercase letters, digits, underscores, periods, hyphens
+// - Cannot start with period or hyphen
+func (u *Uploader) sanitizeVersion(version string) string {
+	if version == "" {
+		return version
+	}
+
+	// Replace invalid characters with underscores
+	// Valid: A-Z, a-z, 0-9, _, ., -
+	result := strings.Builder{}
+	for _, ch := range version {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '.' || ch == '-' {
+			result.WriteRune(ch)
+		} else {
+			result.WriteRune('_')
+		}
+	}
+
+	sanitized := result.String()
+
+	// Remove leading periods or hyphens
+	sanitized = strings.TrimLeft(sanitized, ".-")
+
+	// Ensure it's not empty after sanitization
+	if sanitized == "" {
+		sanitized = "latest"
+	}
+
+	return sanitized
 }
