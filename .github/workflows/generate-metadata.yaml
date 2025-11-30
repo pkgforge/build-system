@@ -205,6 +205,14 @@ jobs:
           [ -f artifacts/bincache-SBUILD_LIST.json ] && cp artifacts/bincache-SBUILD_LIST.json release-files/
           [ -f artifacts/pkgcache-SBUILD_LIST.json ] && cp artifacts/pkgcache-SBUILD_LIST.json release-files/
 
+          # Slim down GHCR_PKGS.json to just names (if it exists)
+          if [ -f artifacts/GHCR_PKGS.json ]; then
+            echo "Slimming down GHCR_PKGS.json..."
+            jq 'map(.name)' artifacts/GHCR_PKGS.json > release-files/GHCR_PKGS.json
+            zstd --ultra -22 --force release-files/GHCR_PKGS.json -o release-files/GHCR_PKGS.json.zstd
+            echo "  ✓ Slimmed GHCR_PKGS.json from $(du -h artifacts/GHCR_PKGS.json | cut -f1) to $(du -h release-files/GHCR_PKGS.json | cut -f1)"
+          fi
+
           # Rename bincache files with prefix
           if [ -d artifacts/bincache/data ]; then
             for file in artifacts/bincache/data/*; do

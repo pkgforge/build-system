@@ -270,18 +270,26 @@ func FetchGHCRPackageList() ([]string, error) {
 		return nil, fmt.Errorf("failed to read JSON: %w", err)
 	}
 
+	// Try to parse as simple string array first (slimmed format from our releases)
+	var names []string
+	if err := json.Unmarshal(data, &names); err == nil {
+		// Success - it's the slimmed format
+		fmt.Printf("  ✓ Found %d GHCR packages (slimmed format)\n", len(names))
+		return names, nil
+	}
+
+	// Fall back to full object format (from metadata repo)
 	var pkgs []GHCRPackageInfo
 	if err := json.Unmarshal(data, &pkgs); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
 	// Extract package names
-	var names []string
 	for _, pkg := range pkgs {
 		names = append(names, pkg.Name)
 	}
 
-	fmt.Printf("  ✓ Found %d GHCR packages\n", len(names))
+	fmt.Printf("  ✓ Found %d GHCR packages (full format)\n", len(names))
 	return names, nil
 }
 
