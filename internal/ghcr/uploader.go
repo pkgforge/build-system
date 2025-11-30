@@ -264,11 +264,66 @@ func (u *Uploader) uploadSinglePackage(build *models.Build, pkgDir string, pkgIn
 // extractPackageInfo extracts package metadata from recipe file and generated JSON
 func (u *Uploader) extractPackageInfo(build *models.Build, pkgDir string) (*PackageInfo, error) {
 	pkgInfo := &PackageInfo{
-		PkgName:   build.PkgName,
 		BuildDate: time.Now().UTC().Format(time.RFC3339),
 	}
 
-	// Try to read generated metadata JSON first (highest priority)
+	// First, try to read from the recipe YAML to get authoritative values
+	recipeData, err := os.ReadFile(build.RecipePath)
+	if err == nil {
+		var recipe map[string]interface{}
+		if err := yaml.Unmarshal(recipeData, &recipe); err == nil {
+			// Read all fields from recipe
+			// Note: pkg_name doesn't exist in recipe YAML - only in generated JSON
+			if v, ok := recipe["pkg"].(string); ok && v != "" {
+				pkgInfo.Pkg = v
+			}
+			if v, ok := recipe["pkg_family"].(string); ok && v != "" {
+				pkgInfo.PkgFamily = v
+			}
+			if v, ok := recipe["pkg_id"].(string); ok && v != "" {
+				pkgInfo.PkgID = v
+			}
+			if v, ok := recipe["version"].(string); ok && v != "" {
+				pkgInfo.Version = v
+			}
+			if v, ok := recipe["version_upstream"].(string); ok && v != "" {
+				pkgInfo.VersionUpstream = v
+			}
+			if v, ok := recipe["description"].(string); ok {
+				pkgInfo.Description = v
+			}
+			if v, ok := recipe["homepage"]; ok && v != nil {
+				pkgInfo.Homepage = v
+			}
+			if v, ok := recipe["src_url"]; ok && v != nil {
+				pkgInfo.SrcURL = v
+			}
+			if v, ok := recipe["provides"].([]interface{}); ok {
+				for _, p := range v {
+					if s, ok := p.(string); ok {
+						pkgInfo.Provides = append(pkgInfo.Provides, s)
+					}
+				}
+			}
+			if v, ok := recipe["category"]; ok && v != nil {
+				pkgInfo.Category = v
+			}
+			if v, ok := recipe["license"]; ok && v != nil {
+				pkgInfo.License = v
+			}
+			if v, ok := recipe["maintainer"]; ok && v != nil {
+				pkgInfo.Maintainer = v
+			}
+			if v, ok := recipe["note"]; ok && v != nil {
+				pkgInfo.Note = v
+			}
+			if v, ok := recipe["tag"]; ok && v != nil {
+				pkgInfo.Tag = v
+			}
+		}
+	}
+
+	// Second priority: Try to read generated metadata JSON (if it exists)
 	jsonFiles, _ := filepath.Glob(filepath.Join(pkgDir, "*.json"))
 	for _, jsonFile := range jsonFiles {
 		if strings.HasSuffix(jsonFile, ".sig") {
@@ -280,158 +335,63 @@ func (u *Uploader) extractPackageInfo(build *models.Build, pkgDir string) (*Pack
 		}
 		var metadata map[string]interface{}
 		if err := json.Unmarshal(data, &metadata); err == nil {
-			// Extract all fields from JSON metadata
-			if v, ok := metadata["pkg"].(string); ok && v != "" {
-				pkgInfo.Pkg = v
-			}
-			if v, ok := metadata["pkg_name"].(string); ok && v != "" {
-				pkgInfo.PkgName = v
-			}
-			if v, ok := metadata["pkg_family"].(string); ok && v != "" {
-				pkgInfo.PkgFamily = v
-			}
-			if v, ok := metadata["pkg_id"].(string); ok && v != "" {
-				pkgInfo.PkgID = v
-			}
-			if v, ok := metadata["version"].(string); ok && v != "" {
-				pkgInfo.Version = v
-			}
-			if v, ok := metadata["version_upstream"].(string); ok && v != "" {
-				pkgInfo.VersionUpstream = v
-			}
-			if v, ok := metadata["description"].(string); ok {
-				pkgInfo.Description = v
-			}
-			// Homepage can be string or array
-			if v, ok := metadata["homepage"]; ok && v != nil {
-				pkgInfo.Homepage = v
-			}
-			// SrcURL can be string or array
-			if v, ok := metadata["src_url"]; ok && v != nil {
-				pkgInfo.SrcURL = v
-			}
-			if v, ok := metadata["provides"].([]interface{}); ok {
-				for _, p := range v {
-					if s, ok := p.(string); ok {
-						pkgInfo.Provides = append(pkgInfo.Provides, s)
-					}
-				}
-			}
-			// Optional fields (can be string or array)
-			if v, ok := metadata["category"]; ok && v != nil {
-				pkgInfo.Category = v
-			}
-			if v, ok := metadata["license"]; ok && v != nil {
-				pkgInfo.License = v
-			}
-			if v, ok := metadata["maintainer"]; ok && v != nil {
-				pkgInfo.Maintainer = v
-			}
-			if v, ok := metadata["note"]; ok && v != nil {
-				pkgInfo.Note = v
-			}
-			if v, ok := metadata["tag"]; ok && v != nil {
-				pkgInfo.Tag = v
-			}
-			if v, ok := metadata["repology"]; ok && v != nil {
-				pkgInfo.Repology = v
-			}
-			if v, ok := metadata["screenshots"]; ok && v != nil {
-				pkgInfo.Screenshots = v
-			}
-			if v, ok := metadata["icon"].(string); ok {
-				pkgInfo.Icon = v
-			}
-			if v, ok := metadata["desktop"].(string); ok {
-				pkgInfo.Desktop = v
-			}
-			if v, ok := metadata["app_id"].(string); ok {
-				pkgInfo.AppID = v
-			}
-			if v, ok := metadata["appstream"].(string); ok {
-				pkgInfo.Appstream = v
-			}
-			if v, ok := metadata["rank"].(string); ok {
-				pkgInfo.Rank = v
-			}
-			if v, ok := metadata["_disabled"].(string); ok {
-				pkgInfo.Disabled = v
-			}
-			if v, ok := metadata["bsum"].(string); ok {
+			// Extract additional fields from JSON metadata (supplement what we got from recipe)
+			// Only update if not already set from recipe
+			if v, ok := metadata["bsum"].(string); ok && pkgInfo.BSum == "" {
 				pkgInfo.BSum = v
 			}
-			if v, ok := metadata["shasum"].(string); ok {
+			if v, ok := metadata["shasum"].(string); ok && pkgInfo.ShaSum == "" {
 				pkgInfo.ShaSum = v
 			}
-			if v, ok := metadata["size"].(string); ok {
+			if v, ok := metadata["size"].(string); ok && pkgInfo.Size == "" {
 				pkgInfo.Size = v
 			}
-			if v, ok := metadata["size_raw"].(float64); ok {
+			if v, ok := metadata["size_raw"].(float64); ok && pkgInfo.SizeRaw == 0 {
 				pkgInfo.SizeRaw = int64(v)
 			}
-			if v, ok := metadata["build_date"].(string); ok && v != "" {
-				pkgInfo.BuildDate = v
+			if v, ok := metadata["icon"].(string); ok && pkgInfo.Icon == "" {
+				pkgInfo.Icon = v
+			}
+			if v, ok := metadata["desktop"].(string); ok && pkgInfo.Desktop == "" {
+				pkgInfo.Desktop = v
+			}
+			if v, ok := metadata["app_id"].(string); ok && pkgInfo.AppID == "" {
+				pkgInfo.AppID = v
+			}
+			if v, ok := metadata["appstream"].(string); ok && pkgInfo.Appstream == "" {
+				pkgInfo.Appstream = v
+			}
+			if v, ok := metadata["rank"].(string); ok && pkgInfo.Rank == "" {
+				pkgInfo.Rank = v
+			}
+			if v, ok := metadata["_disabled"].(string); ok && pkgInfo.Disabled == "" {
+				pkgInfo.Disabled = v
+			}
+			if v, ok := metadata["repology"]; ok && v != nil && pkgInfo.Repology == nil {
+				pkgInfo.Repology = v
+			}
+			if v, ok := metadata["screenshots"]; ok && v != nil && pkgInfo.Screenshots == nil {
+				pkgInfo.Screenshots = v
 			}
 			break // Use first valid JSON found
-		}
-	}
-
-	// If no JSON metadata found, try to read from recipe YAML
-	if pkgInfo.Version == "" || pkgInfo.PkgFamily == "" {
-		recipeData, err := os.ReadFile(build.RecipePath)
-		if err == nil {
-			var recipe map[string]interface{}
-			if err := yaml.Unmarshal(recipeData, &recipe); err == nil {
-				if v, ok := recipe["pkg"].(string); ok && pkgInfo.Pkg == "" {
-					pkgInfo.Pkg = v
-				}
-				if v, ok := recipe["pkg_name"].(string); ok && pkgInfo.PkgName == "" {
-					pkgInfo.PkgName = v
-				}
-				if v, ok := recipe["pkg_family"].(string); ok && pkgInfo.PkgFamily == "" {
-					pkgInfo.PkgFamily = v
-				}
-				if v, ok := recipe["pkg_id"].(string); ok && pkgInfo.PkgID == "" {
-					pkgInfo.PkgID = v
-				}
-				if v, ok := recipe["version"].(string); ok && pkgInfo.Version == "" {
-					pkgInfo.Version = v
-				}
-				if v, ok := recipe["version_upstream"].(string); ok && pkgInfo.VersionUpstream == "" {
-					pkgInfo.VersionUpstream = v
-				}
-				if v, ok := recipe["description"].(string); ok && pkgInfo.Description == "" {
-					pkgInfo.Description = v
-				}
-				if v, ok := recipe["homepage"]; ok && pkgInfo.Homepage == nil {
-					pkgInfo.Homepage = v
-				}
-				if v, ok := recipe["src_url"]; ok && pkgInfo.SrcURL == nil {
-					pkgInfo.SrcURL = v
-				}
-				// Read other fields from YAML
-				if v, ok := recipe["category"]; ok && pkgInfo.Category == nil {
-					pkgInfo.Category = v
-				}
-				if v, ok := recipe["license"]; ok && pkgInfo.License == nil {
-					pkgInfo.License = v
-				}
-				if v, ok := recipe["maintainer"]; ok && pkgInfo.Maintainer == nil {
-					pkgInfo.Maintainer = v
-				}
-				if v, ok := recipe["note"]; ok && pkgInfo.Note == nil {
-					pkgInfo.Note = v
-				}
-				if v, ok := recipe["tag"]; ok && pkgInfo.Tag == nil {
-					pkgInfo.Tag = v
-				}
-			}
 		}
 	}
 
 	// Fallback: extract pkg_family from recipe path if still empty
 	if pkgInfo.PkgFamily == "" {
 		pkgInfo.PkgFamily, _ = u.extractPackageNames(build.RecipePath)
+	}
+
+	// Final fallback: if pkg_name is still empty, try to extract from build.PkgName
+	// but handle pkg_id format (e.g., "github.com.user.package" -> "package")
+	if pkgInfo.PkgName == "" && build.PkgName != "" {
+		name := build.PkgName
+		// If it looks like a pkg_id (has multiple dots), extract the last part
+		if strings.Count(name, ".") >= 2 {
+			parts := strings.Split(name, ".")
+			name = parts[len(parts)-1]
+		}
+		pkgInfo.PkgName = name
 	}
 
 	return pkgInfo, nil
